@@ -31,16 +31,6 @@
 
 ---
 
-## 📦 GitHub Actions Multi-Platform CI
-
-Pushing to GitHub triggers [`.github/workflows/build-mobile.yml`](.github/workflows/build-mobile.yml) and produces artifacts for all three platforms:
-
-- **`SecureVault-Android-APK`**: Release `app-release.apk` with embedded `libsecurevault_core.so` (`arm64-v8a`, `armeabi-v7a`, `x86_64`).
-- **`SecureVault-iOS-Packages`**: `SecureVault-iOS-Simulator-App.zip` (`Runner.app` ready to drag-and-drop into Xcode Simulator) and `SecureVault-iOS-Unsigned.ipa`.
-- **`SecureVault-HarmonyOS-HAP`**: Unsigned `.hap` package + `libsecurevault_core.so` (`arm64-v8a`), ready for signing and installation on HarmonyOS NEXT (API 26+).
-
----
-
 ## 🛠️ Local Verification
 
 ```bash

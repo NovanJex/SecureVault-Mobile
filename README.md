@@ -47,18 +47,6 @@
 
 ---
 
-## 📦 GitHub Actions 三端自动构建
-
-推送代码到 GitHub 后，[`.github/workflows/build-mobile.yml`](.github/workflows/build-mobile.yml) 会自动执行 Rust 单元测试并构建三端安装包（在 Actions 页面底部 **Artifacts** 下载）：
-
-| 平台 | Artifact 名称 | 产物说明 | 安装与验证方式 |
-| --- | --- | --- | --- |
-| **Android** | `SecureVault-Android-APK` | `app-release.apk`（含 arm64-v8a / armeabi-v7a / x86_64 `.so`） | 直接安装到 Android 手机测试 |
-| **iOS** | `SecureVault-iOS-Packages` | `SecureVault-iOS-Simulator-App.zip` (`Runner.app`) & `SecureVault-iOS-Unsigned.ipa` | macOS 上打开 Xcode Simulator，将 `Runner.app` 直接拖入模拟器即可运行；真机需签名 `.ipa` |
-| **HarmonyOS 7.0** | `SecureVault-HarmonyOS-HAP` | 未签名 `.hap` 安装包 + `libsecurevault_core.so` | 使用你的鸿蒙调试/发布证书对 `.hap` 签名后，通过 `hdc install` 或 DevEco Studio 安装到真机 |
-
----
-
 ## 🛠️ 本地开发环境
 
 ### 1. Rust 核心库测试（Windows / macOS / Linux）
