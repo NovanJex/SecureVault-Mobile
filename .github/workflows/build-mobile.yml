@@ -161,26 +161,15 @@ jobs:
           path: dist_ios/*
 
   # ============================================================
-  # 4. HarmonyOS NEXT 7.0 (API 26 / arm64-v8a Unsigned .hap)
+  # 4a. HarmonyOS NEXT Rust Core (arm64-v8a .so via OHOS NDK)
   # ============================================================
-  build-harmonyos:
-    name: "Build HarmonyOS NEXT Unsigned HAP"
+  build-harmonyos-rust:
+    name: "Build HarmonyOS Rust Core (.so)"
     needs: rust-core-test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v5
-        with:
-          distribution: 'zulu'
-          java-version: '17'
-
-      - name: Set up Node.js 18
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
 
       - name: Setup HarmonyOS CLI Tools & SDK
         uses: ErBWs/setup-ohos@v2
@@ -199,8 +188,6 @@ jobs:
           if [ ! -d "$NDK_PATH/native/llvm" ]; then
             NDK_PATH=$(find "${HOS_SDK_HOME:-$HOME}" -maxdepth 4 -type d -name "openharmony" | head -n 1)
           fi
-          echo "Using OHOS NDK: $NDK_PATH"
-
           CLANG="$NDK_PATH/native/llvm/bin/clang"
           CLANGXX="$NDK_PATH/native/llvm/bin/clang++"
           LLVM_AR="$NDK_PATH/native/llvm/bin/llvm-ar"
@@ -219,21 +206,34 @@ jobs:
           mkdir -p ../dist_ohos/libs/arm64-v8a
           cp target/aarch64-unknown-linux-ohos/release/libsecurevault_core.so ../dist_ohos/libs/arm64-v8a/libsecurevault_core.so
 
-      - name: Setup OpenHarmony Flutter SDK & Build Unsigned HAP
+      - name: Upload HarmonyOS Rust .so
+        uses: actions/upload-artifact@v4
+        with:
+          name: ohos-rust-so
+          path: dist_ohos/libs/arm64-v8a/libsecurevault_core.so
+
+  # ============================================================
+  # 4b. HarmonyOS NEXT Unsigned HAP (Pre-built Flutter-OHOS Pipeline Container)
+  # ============================================================
+  build-harmonyos:
+    name: "Build HarmonyOS NEXT Unsigned HAP"
+    needs: build-harmonyos-rust
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/niuhuan/harmony-next-flutter-pipeline-docker/image:latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download HarmonyOS Rust .so
+        uses: actions/download-artifact@v4
+        with:
+          name: ohos-rust-so
+          path: dist_ohos/libs/arm64-v8a
+
+      - name: Generate OHOS Project & Build Unsigned HAP
         run: |
           git config --global --add safe.directory '*'
-          export FLUTTER_STORAGE_BASE_URL="https://flutter-ohos.obs.cn-south-1.myhuaweicloud.com"
-          export PUB_HOSTED_URL="https://pub.flutter-io.cn"
-          export DEVECO_SDK_HOME="${DEVECO_SDK_HOME:-$HOS_SDK_HOME}"
-          export TOOL_HOME="${TOOL_HOME:-$(dirname "$DEVECO_SDK_HOME")}"
-          export PATH="$TOOL_HOME/tools/ohpm/bin:$TOOL_HOME/tools/hvigor/bin:$HOME/flutter_ohos/bin:$PATH"
-
-          git clone --depth 1 -b oh-3.22.0 https://gitcode.com/openharmony-tpc/flutter_flutter.git $HOME/flutter_ohos || \
-            git clone --depth 1 https://gitcode.com/openharmony-tpc/flutter_flutter.git $HOME/flutter_ohos
-
-          flutter config --ohos-sdk="$DEVECO_SDK_HOME" || true
-          flutter doctor -v || true
-
           cp pubspec.yaml pubspec.yaml.bak
           cp lib/main.dart lib/main.dart.bak
           flutter create --org com.securevault --project-name securevault_app --platforms=ohos .
@@ -247,9 +247,10 @@ jobs:
           cp platform_overrides/ohos/SecureVaultNativePlugin.ets ohos/entry/src/main/ets/entryability/SecureVaultNativePlugin.ets
 
           flutter pub get
-          flutter build hap --release --target-platform ohos-arm64 --no-pub || (
-            cd ohos && (./hvigorw assembleHap --mode module -p product=default -p buildMode=release --no-daemon || hvigorw assembleHap --mode module -p product=default -p buildMode=release --no-daemon)
-          )
+          flutter build hap --target-platform=ohos-arm64 || true
+          cd ohos
+          hvigorw assembleHap --release
+          cd ..
 
           mkdir -p dist_ohos/hap
           find ohos -name "*.hap" -exec cp {} dist_ohos/hap/ \;
