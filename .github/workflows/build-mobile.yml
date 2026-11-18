@@ -1,0 +1,234 @@
+name: "SecureVault Mobile Multi-Platform Build (Android / iOS / HarmonyOS)"
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # ============================================================
+  # 1. Rust Core Unit & FFI Verification
+  # ============================================================
+  rust-core-test:
+    name: "Rust Core (Crypto / KDBX / TOTP / FFI) Tests"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./rust -> target"
+
+      - name: Run cargo test
+        working-directory: ./rust
+        run: cargo test --release
+
+  # ============================================================
+  # 2. Android APK Build (ARM64 + ARMv7 + x86_64)
+  # ============================================================
+  build-android:
+    name: "Build Android APK"
+    needs: rust-core-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install Rust Android Targets & cargo-ndk
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+
+      - name: Generate Android Platform Runner Scaffolding
+        run: |
+          cp pubspec.yaml pubspec.yaml.bak
+          cp lib/main.dart lib/main.dart.bak
+          flutter create --org com.securevault --project-name securevault_app --platforms=android .
+          mv pubspec.yaml.bak pubspec.yaml
+          mv lib/main.dart.bak lib/main.dart
+          mkdir -p android/app/src/main/kotlin/com/securevault/securevault_app
+          cp platform_overrides/android/MainActivity.kt android/app/src/main/kotlin/com/securevault/securevault_app/MainActivity.kt
+          rm -f android/app/src/main/java/com/securevault/securevault_app/MainActivity.java || true
+
+      - name: Build Rust Core (.so) for Android jniLibs
+        working-directory: ./rust
+        run: |
+          cargo ndk \
+            -t arm64-v8a \
+            -t armeabi-v7a \
+            -t x86_64 \
+            -o ../android/app/src/main/jniLibs \
+            build --release
+
+      - name: Build Flutter Android Release APK
+        run: |
+          flutter pub get
+          flutter build apk --release
+
+      - name: Upload Android APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SecureVault-Android-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+  # ============================================================
+  # 3. iOS Build (Simulator .app for macOS 15.7.2 + Unsigned .ipa)
+  # ============================================================
+  build-ios:
+    name: "Build iOS (Simulator .app & Unsigned .ipa)"
+    needs: rust-core-test
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install Rust iOS Targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - name: Generate iOS Platform Runner Scaffolding
+        run: |
+          cp pubspec.yaml pubspec.yaml.bak
+          cp lib/main.dart lib/main.dart.bak
+          flutter create --org com.securevault --project-name securevault_app --platforms=ios .
+          mv pubspec.yaml.bak pubspec.yaml
+          mv lib/main.dart.bak lib/main.dart
+          cp platform_overrides/ios/AppDelegate.swift ios/Runner/AppDelegate.swift
+
+      - name: Build Rust Core (.a) for iOS Device & Simulator
+        working-directory: ./rust
+        run: |
+          cargo build --release --target aarch64-apple-ios
+          cargo build --release --target aarch64-apple-ios-sim
+
+      - name: Link Rust Static Library in Xcode Configs
+        run: |
+          echo "OTHER_LDFLAGS = \$(inherited) -force_load \$(SRCROOT)/../rust/target/aarch64-apple-ios-sim/release/libsecurevault_core.a" >> ios/Flutter/Debug.xcconfig
+          flutter pub get
+          flutter build ios --simulator
+
+          mkdir -p dist_ios
+          cd build/ios/iphonesimulator
+          zip -r ../../../dist_ios/SecureVault-iOS-Simulator-App.zip Runner.app
+          cd ../../..
+
+          sed -i '' 's/aarch64-apple-ios-sim/aarch64-apple-ios/g' ios/Flutter/Release.xcconfig || true
+          echo "OTHER_LDFLAGS = \$(inherited) -force_load \$(SRCROOT)/../rust/target/aarch64-apple-ios/release/libsecurevault_core.a" >> ios/Flutter/Release.xcconfig
+          flutter build ios --release --no-codesign
+
+          mkdir -p build/ios/iphoneos/Payload
+          cp -r build/ios/iphoneos/Runner.app build/ios/iphoneos/Payload/
+          cd build/ios/iphoneos
+          zip -r ../../../dist_ios/SecureVault-iOS-Unsigned.ipa Payload
+          cd ../../..
+
+      - name: Upload iOS Artifacts (Simulator .app & Unsigned .ipa)
+        uses: actions/upload-artifact@v4
+        with:
+          name: SecureVault-iOS-Packages
+          path: dist_ios/*
+
+  # ============================================================
+  # 4. HarmonyOS NEXT 7.0 (API 26 / arm64-v8a Unsigned .hap)
+  # ============================================================
+  build-harmonyos:
+    name: "Build HarmonyOS NEXT Unsigned HAP"
+    needs: rust-core-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Set up Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Setup HarmonyOS CLI Tools & SDK
+        uses: ErBWs/setup-ohos@v2
+        with:
+          cache: true
+
+      - name: Install Rust & zigbuild for OHOS arm64-v8a
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install zig & cargo-zigbuild
+        run: |
+          pip3 install ziglang
+          cargo install cargo-zigbuild
+
+      - name: Cross-Compile libsecurevault_core.so for HarmonyOS (arm64-v8a)
+        working-directory: ./rust
+        run: |
+          cargo zigbuild --release --target aarch64-unknown-linux-musl
+          mkdir -p ../dist_ohos/libs/arm64-v8a
+          cp target/aarch64-unknown-linux-musl/release/libsecurevault_core.so ../dist_ohos/libs/arm64-v8a/libsecurevault_core.so
+
+      - name: Setup OpenHarmony Flutter SDK & Build Unsigned HAP
+        run: |
+          git config --global --add safe.directory '*'
+          git clone --depth 1 https://gitcode.com/openharmony-tpc/flutter_flutter.git $HOME/flutter_ohos
+          export PATH="$HOME/flutter_ohos/bin:$PATH"
+
+          cp pubspec.yaml pubspec.yaml.bak
+          cp lib/main.dart lib/main.dart.bak
+          flutter create --org com.securevault --project-name securevault_app --platforms=ohos .
+          mv pubspec.yaml.bak pubspec.yaml
+          mv lib/main.dart.bak lib/main.dart
+
+          mkdir -p ohos/entry/libs/arm64-v8a
+          cp dist_ohos/libs/arm64-v8a/libsecurevault_core.so ohos/entry/libs/arm64-v8a/libsecurevault_core.so
+          mkdir -p ohos/entry/src/main/ets/entryability
+          cp platform_overrides/ohos/EntryAbility.ets ohos/entry/src/main/ets/entryability/EntryAbility.ets
+
+          flutter pub get
+          flutter build hap --release --target-platform ohos-arm64
+
+          mkdir -p dist_ohos/hap
+          find ohos -name "*.hap" -exec cp {} dist_ohos/hap/ \;
+
+      - name: Upload HarmonyOS HAP & Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SecureVault-HarmonyOS-HAP
+          path: |
+            dist_ohos/hap/*.hap
+            dist_ohos/libs/arm64-v8a/libsecurevault_core.so

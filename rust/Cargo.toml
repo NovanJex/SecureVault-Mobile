@@ -1,0 +1,25 @@
+[package]
+name = "securevault_core"
+version = "1.0.0"
+edition = "2021"
+description = "Cross-platform Rust cryptographic, KDBX, TOTP, and WebDAV core for SecureVault Mobile (Android, iOS, HarmonyOS NEXT)"
+
+[lib]
+name = "securevault_core"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+aes-gcm = "0.10.3"
+pbkdf2 = "0.12.2"
+sha2 = "0.10.8"
+argon2 = "0.5"
+rand = "0.8.5"
+base64 = "0.22.1"
+encoding_rs = "0.8"
+keepass = { version = "0.7", features = ["save_kdbx4"] }
+secstr = "0.5"
+totp-rs = "5"
+chrono = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
