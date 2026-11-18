@@ -222,12 +222,17 @@ jobs:
       - name: Setup OpenHarmony Flutter SDK & Build Unsigned HAP
         run: |
           git config --global --add safe.directory '*'
+          export FLUTTER_STORAGE_BASE_URL="https://flutter-ohos.obs.cn-south-1.myhuaweicloud.com"
+          export PUB_HOSTED_URL="https://pub.flutter-io.cn"
+          export DEVECO_SDK_HOME="${DEVECO_SDK_HOME:-$HOS_SDK_HOME}"
+          export TOOL_HOME="${TOOL_HOME:-$(dirname "$DEVECO_SDK_HOME")}"
+          export PATH="$TOOL_HOME/tools/ohpm/bin:$TOOL_HOME/tools/hvigor/bin:$HOME/flutter_ohos/bin:$PATH"
+
           git clone --depth 1 -b oh-3.22.0 https://gitcode.com/openharmony-tpc/flutter_flutter.git $HOME/flutter_ohos || \
             git clone --depth 1 https://gitcode.com/openharmony-tpc/flutter_flutter.git $HOME/flutter_ohos
-          export PATH="$HOME/flutter_ohos/bin:$PATH"
-          if [ -n "${HOS_SDK_HOME:-}" ]; then
-            flutter config --ohos-sdk="$HOS_SDK_HOME" || true
-          fi
+
+          flutter config --ohos-sdk="$DEVECO_SDK_HOME" || true
+          flutter doctor -v || true
 
           cp pubspec.yaml pubspec.yaml.bak
           cp lib/main.dart lib/main.dart.bak
@@ -241,8 +246,8 @@ jobs:
           cp platform_overrides/ohos/EntryAbility.ets ohos/entry/src/main/ets/entryability/EntryAbility.ets
 
           flutter pub get
-          flutter build hap --release --target-platform ohos-arm64 || (
-            cd ohos && hvigorw assembleHap --mode module -p product=default -p buildMode=release --no-daemon
+          flutter build hap --release --target-platform ohos-arm64 --no-pub || (
+            cd ohos && (./hvigorw assembleHap --mode module -p product=default -p buildMode=release --no-daemon || hvigorw assembleHap --mode module -p product=default -p buildMode=release --no-daemon)
           )
 
           mkdir -p dist_ohos/hap
