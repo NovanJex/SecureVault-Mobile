@@ -244,6 +244,7 @@ jobs:
           cp dist_ohos/libs/arm64-v8a/libsecurevault_core.so ohos/entry/libs/arm64-v8a/libsecurevault_core.so
           mkdir -p ohos/entry/src/main/ets/entryability
           cp platform_overrides/ohos/EntryAbility.ets ohos/entry/src/main/ets/entryability/EntryAbility.ets
+          cp platform_overrides/ohos/SecureVaultNativePlugin.ets ohos/entry/src/main/ets/entryability/SecureVaultNativePlugin.ets
 
           flutter pub get
           flutter build hap --release --target-platform ohos-arm64 --no-pub || (
