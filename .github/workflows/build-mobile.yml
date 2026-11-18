@@ -172,7 +172,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'zulu'
           java-version: '17'
@@ -187,28 +187,47 @@ jobs:
         with:
           cache: true
 
-      - name: Install Rust & zigbuild for OHOS arm64-v8a
+      - name: Install Rust HarmonyOS Target (aarch64-unknown-linux-ohos)
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-unknown-linux-musl
-
-      - name: Install zig & cargo-zigbuild
-        run: |
-          pip3 install ziglang
-          cargo install cargo-zigbuild
+          targets: aarch64-unknown-linux-ohos
 
       - name: Cross-Compile libsecurevault_core.so for HarmonyOS (arm64-v8a)
         working-directory: ./rust
         run: |
-          cargo zigbuild --release --target aarch64-unknown-linux-musl
+          NDK_PATH="${OHOS_NDK_HOME:-$HOS_SDK_HOME/default/openharmony}"
+          if [ ! -d "$NDK_PATH/native/llvm" ]; then
+            NDK_PATH=$(find "${HOS_SDK_HOME:-$HOME}" -maxdepth 4 -type d -name "openharmony" | head -n 1)
+          fi
+          echo "Using OHOS NDK: $NDK_PATH"
+
+          CLANG="$NDK_PATH/native/llvm/bin/clang"
+          CLANGXX="$NDK_PATH/native/llvm/bin/clang++"
+          LLVM_AR="$NDK_PATH/native/llvm/bin/llvm-ar"
+          SYSROOT="$NDK_PATH/native/sysroot"
+
+          export CC_aarch64_unknown_linux_ohos="$CLANG"
+          export CXX_aarch64_unknown_linux_ohos="$CLANGXX"
+          export AR_aarch64_unknown_linux_ohos="$LLVM_AR"
+          export CFLAGS_aarch64_unknown_linux_ohos="--target=aarch64-linux-ohos --sysroot=$SYSROOT -D__MUSL__"
+          export CXXFLAGS_aarch64_unknown_linux_ohos="--target=aarch64-linux-ohos --sysroot=$SYSROOT -D__MUSL__"
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER="$CLANG"
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_AR="$LLVM_AR"
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_RUSTFLAGS="-C link-arg=--target=aarch64-linux-ohos -C link-arg=--sysroot=$SYSROOT"
+
+          cargo build --release --target aarch64-unknown-linux-ohos
           mkdir -p ../dist_ohos/libs/arm64-v8a
-          cp target/aarch64-unknown-linux-musl/release/libsecurevault_core.so ../dist_ohos/libs/arm64-v8a/libsecurevault_core.so
+          cp target/aarch64-unknown-linux-ohos/release/libsecurevault_core.so ../dist_ohos/libs/arm64-v8a/libsecurevault_core.so
 
       - name: Setup OpenHarmony Flutter SDK & Build Unsigned HAP
         run: |
           git config --global --add safe.directory '*'
-          git clone --depth 1 https://gitcode.com/openharmony-tpc/flutter_flutter.git $HOME/flutter_ohos
+          git clone --depth 1 -b oh-3.22.0 https://gitcode.com/openharmony-tpc/flutter_flutter.git $HOME/flutter_ohos || \
+            git clone --depth 1 https://gitcode.com/openharmony-tpc/flutter_flutter.git $HOME/flutter_ohos
           export PATH="$HOME/flutter_ohos/bin:$PATH"
+          if [ -n "${HOS_SDK_HOME:-}" ]; then
+            flutter config --ohos-sdk="$HOS_SDK_HOME" || true
+          fi
 
           cp pubspec.yaml pubspec.yaml.bak
           cp lib/main.dart lib/main.dart.bak
@@ -222,10 +241,13 @@ jobs:
           cp platform_overrides/ohos/EntryAbility.ets ohos/entry/src/main/ets/entryability/EntryAbility.ets
 
           flutter pub get
-          flutter build hap --release --target-platform ohos-arm64
+          flutter build hap --release --target-platform ohos-arm64 || (
+            cd ohos && hvigorw assembleHap --mode module -p product=default -p buildMode=release --no-daemon
+          )
 
           mkdir -p dist_ohos/hap
           find ohos -name "*.hap" -exec cp {} dist_ohos/hap/ \;
+          ls -lh dist_ohos/hap/
 
       - name: Upload HarmonyOS HAP & Artifacts
         uses: actions/upload-artifact@v4
