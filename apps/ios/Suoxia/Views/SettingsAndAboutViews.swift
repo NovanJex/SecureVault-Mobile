@@ -956,13 +956,13 @@ private struct KdbxExportPasswordSheet: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 16)
 
-            RoundedFormField(
+            FormTextFieldBox(
                 label: t("导出密码"),
                 placeholder: t("输入用于保护 .kdbx 文件的密码"),
                 text: $password,
                 isDark: isDark,
                 isSecure: true,
-                showSecureText: $showPwd
+                showEyeToggle: true
             )
             .padding(.horizontal, 16)
 

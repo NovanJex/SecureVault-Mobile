@@ -445,7 +445,7 @@ struct CredentialDetailView: View {
 
     private func liveTotpCard(secret: String) -> some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
-            let res = (try? SecureVaultCore.generateTotp(secret: secret)) ?? ("------", 30)
+            let res = (try? SecureVaultCore.generateTotp(secret: secret)) ?? (code: "------", remaining: 30)
             let urgent = res.remaining <= 5
             HStack {
                 VStack(alignment: .leading, spacing: 4) {

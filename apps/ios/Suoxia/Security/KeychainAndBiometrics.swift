@@ -26,7 +26,7 @@ enum KeychainAndBiometrics {
     }
 
     static func copySensitive(_ value: String) {
-        UIPasteboard.general.setItems([[UIPasteboard.typeListString[0]: value]], options: [.localOnly: true])
+        UIPasteboard.general.setItems([["public.utf8-plain-text": value]], options: [.localOnly: true])
     }
 
     static func saveKeychainValue(_ value: String, account: String) {

@@ -58,7 +58,7 @@ struct TotpListView: View {
                         } else {
                             LazyVStack(spacing: 10) {
                                 ForEach(filteredTokens) { token in
-                                    let res = (try? SecureVaultCore.generateTotp(secret: token.secret)) ?? ("------", 30)
+                                    let res = (try? SecureVaultCore.generateTotp(secret: token.secret)) ?? (code: "------", remaining: 30)
                                     let urgent = res.remaining <= 5
                                     HStack(spacing: 12) {
                                         VStack(alignment: .leading, spacing: 3) {
