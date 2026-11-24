@@ -1,0 +1,43 @@
+name: iOS SwiftUI CI
+on:
+  push:
+    paths: ['apps/ios/**', 'core/rust/**', '.github/workflows/ci-ios.yml']
+  pull_request:
+    paths: ['apps/ios/**', 'core/rust/**']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust iOS Simulator Target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+
+      - name: Build Rust iOS Staticlib
+        run: |
+          cargo build --release --manifest-path core/rust/Cargo.toml --target aarch64-apple-ios-sim
+          mkdir -p apps/ios/Libs
+          cp core/rust/target/aarch64-apple-ios-sim/release/libsecurevault_core.a apps/ios/Libs/libsecurevault_core.a
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode Project
+        working-directory: apps/ios
+        run: xcodegen generate
+
+      - name: Build iOS SwiftUI App (Simulator, Unsigned)
+        run: |
+          xcodebuild \
+            -project apps/ios/Suoxia.xcodeproj \
+            -scheme Suoxia \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build

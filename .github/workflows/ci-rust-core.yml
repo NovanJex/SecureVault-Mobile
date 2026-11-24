@@ -1,0 +1,13 @@
+name: Rust Core CI
+on:
+  push:
+    paths: ['core/rust/**', '.github/workflows/ci-rust-core.yml']
+  pull_request:
+    paths: ['core/rust/**']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --manifest-path core/rust/Cargo.toml

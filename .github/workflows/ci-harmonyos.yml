@@ -1,0 +1,62 @@
+name: HarmonyOS NEXT CI
+on:
+  push:
+    paths: ['apps/harmonyos/**', 'core/rust/**', '.github/workflows/ci-harmonyos.yml']
+  pull_request:
+    paths: ['apps/harmonyos/**', 'core/rust/**']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup HarmonyOS CLI Tools & SDK
+        uses: ErBWs/setup-ohos@v2
+        with:
+          cache: true
+
+      - name: Setup Rust HarmonyOS Target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-ohos
+
+      - name: Cross-Compile libsecurevault_core.so for HarmonyOS (arm64-v8a)
+        working-directory: core/rust
+        run: |
+          NDK_PATH="${OHOS_NDK_HOME:-$HOS_SDK_HOME/default/openharmony}"
+          if [ ! -d "$NDK_PATH/native/llvm" ]; then
+            NDK_PATH=$(find "${HOS_SDK_HOME:-$HOME}" -maxdepth 4 -type d -name "openharmony" | head -n 1)
+          fi
+          CLANG="$NDK_PATH/native/llvm/bin/clang"
+          CLANGXX="$NDK_PATH/native/llvm/bin/clang++"
+          LLVM_AR="$NDK_PATH/native/llvm/bin/llvm-ar"
+          SYSROOT="$NDK_PATH/native/sysroot"
+
+          export CC_aarch64_unknown_linux_ohos="$CLANG"
+          export CXX_aarch64_unknown_linux_ohos="$CLANGXX"
+          export AR_aarch64_unknown_linux_ohos="$LLVM_AR"
+          export CFLAGS_aarch64_unknown_linux_ohos="--target=aarch64-linux-ohos --sysroot=$SYSROOT -D__MUSL__"
+          export CXXFLAGS_aarch64_unknown_linux_ohos="--target=aarch64-linux-ohos --sysroot=$SYSROOT -D__MUSL__"
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER="$CLANG"
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_AR="$LLVM_AR"
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_RUSTFLAGS="-C link-arg=--target=aarch64-linux-ohos -C link-arg=--sysroot=$SYSROOT"
+
+          cargo build --release --target aarch64-unknown-linux-ohos
+          mkdir -p ../../apps/harmonyos/entry/libs/arm64-v8a
+          cp target/aarch64-unknown-linux-ohos/release/libsecurevault_core.so ../../apps/harmonyos/entry/libs/arm64-v8a/libsecurevault_core.so
+
+      - name: Build HarmonyOS Unsigned HAP
+        working-directory: apps/harmonyos
+        run: |
+          ohpm install --all
+          hvigorw assembleHap --mode module -p product=default -p buildMode=debug --no-daemon
+
+      - name: Upload HarmonyOS Unsigned HAP & Rust Core
+        uses: actions/upload-artifact@v4
+        with:
+          name: SecureVault-HarmonyOS-Debug-HAP
+          path: |
+            apps/harmonyos/entry/build/default/outputs/default/*.hap
+            apps/harmonyos/entry/libs/arm64-v8a/libsecurevault_core.so

@@ -1,0 +1,4 @@
+module SecureVaultCoreFFI {
+    header "../../../../core/rust/include/securevault_core.h"
+    export *
+}

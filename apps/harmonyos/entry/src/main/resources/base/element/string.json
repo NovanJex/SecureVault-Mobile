@@ -1,0 +1,9 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "SecureVault local encrypted password manager" },
+    { "name": "EntryAbility_desc", "value": "SecureVault main entry" },
+    { "name": "EntryAbility_label", "value": "SecureVault" },
+    { "name": "camera_reason", "value": "Used to scan two-factor authentication QR codes" },
+    { "name": "biometric_reason", "value": "Used to unlock your vault with face or fingerprint" }
+  ]
+}

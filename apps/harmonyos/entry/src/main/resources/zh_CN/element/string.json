@@ -1,0 +1,9 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "锁匣本地加密密码管理器" },
+    { "name": "EntryAbility_desc", "value": "锁匣主入口" },
+    { "name": "EntryAbility_label", "value": "锁匣" },
+    { "name": "camera_reason", "value": "用于扫描两步验证二维码" },
+    { "name": "biometric_reason", "value": "用于面容或指纹解锁保险箱" }
+  ]
+}
