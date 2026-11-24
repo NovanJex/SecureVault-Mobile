@@ -37,12 +37,13 @@ jobs:
           targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
       - run: cargo install cargo-ndk --locked
       - name: Build Rust Core (.so) for Android
+        working-directory: core/rust
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.1.12297006
         run: |
           cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 \
-            -o apps/android/app/src/main/jniLibs \
-            build --release --manifest-path core/rust/Cargo.toml
+            -o ../../apps/android/app/src/main/jniLibs \
+            build --release
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
@@ -58,7 +59,7 @@ jobs:
   build-ios:
     name: Build iOS SwiftUI (Unsigned)
     needs: rust-core-test
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
