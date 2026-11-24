@@ -1,0 +1,156 @@
+name: Release Multi-Platform Build (Android / iOS / HarmonyOS)
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - '[0-9]+.[0-9]+.[0-9]+*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  rust-core-test:
+    name: Rust Core Tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --manifest-path core/rust/Cargo.toml
+
+  build-android:
+    name: Build Android APK
+    needs: rust-core-test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-35 build-tools;35.0.0 ndk;27.1.12297006 cmake;3.22.1'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      - run: cargo install cargo-ndk --locked
+      - name: Build Rust Core (.so) for Android
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.1.12297006
+        run: |
+          cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 \
+            -o apps/android/app/src/main/jniLibs \
+            build --release --manifest-path core/rust/Cargo.toml
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build Android APK
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.1.12297006
+        run: gradle -p apps/android assembleDebug --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-android-apk
+          path: apps/android/app/build/outputs/apk/debug/*.apk
+
+  build-ios:
+    name: Build iOS SwiftUI (Unsigned)
+    needs: rust-core-test
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+      - name: Build Rust iOS Staticlib
+        run: |
+          cargo build --release --manifest-path core/rust/Cargo.toml --target aarch64-apple-ios-sim
+          mkdir -p apps/ios/Libs
+          cp core/rust/target/aarch64-apple-ios-sim/release/libsecurevault_core.a apps/ios/Libs/libsecurevault_core.a
+      - run: brew install xcodegen
+      - working-directory: apps/ios
+        run: xcodegen generate
+      - name: Build iOS Simulator App (Unsigned)
+        run: |
+          xcodebuild \
+            -project apps/ios/Suoxia.xcodeproj \
+            -scheme Suoxia \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath apps/ios/build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+          cd apps/ios/build/Build/Products/Release-iphonesimulator
+          zip -r Suoxia-iOS-Simulator-Unsigned.zip Suoxia.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-ios-sim
+          path: apps/ios/build/Build/Products/Release-iphonesimulator/Suoxia-iOS-Simulator-Unsigned.zip
+
+  build-harmonyos:
+    name: Build HarmonyOS NEXT Unsigned HAP
+    needs: rust-core-test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ErBWs/setup-ohos@v2
+        with:
+          cache: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-ohos
+      - name: Cross-Compile libsecurevault_core.so for HarmonyOS
+        working-directory: core/rust
+        run: |
+          NDK_PATH="${OHOS_NDK_HOME:-$HOS_SDK_HOME/default/openharmony}"
+          if [ ! -d "$NDK_PATH/native/llvm" ]; then
+            NDK_PATH=$(find "${HOS_SDK_HOME:-$HOME}" -maxdepth 4 -type d -name "openharmony" | head -n 1)
+          fi
+          CLANG="$NDK_PATH/native/llvm/bin/clang"
+          CLANGXX="$NDK_PATH/native/llvm/bin/clang++"
+          LLVM_AR="$NDK_PATH/native/llvm/bin/llvm-ar"
+          SYSROOT="$NDK_PATH/native/sysroot"
+
+          export CC_aarch64_unknown_linux_ohos="$CLANG"
+          export CXX_aarch64_unknown_linux_ohos="$CLANGXX"
+          export AR_aarch64_unknown_linux_ohos="$LLVM_AR"
+          export CFLAGS_aarch64_unknown_linux_ohos="--target=aarch64-linux-ohos --sysroot=$SYSROOT -D__MUSL__"
+          export CXXFLAGS_aarch64_unknown_linux_ohos="--target=aarch64-linux-ohos --sysroot=$SYSROOT -D__MUSL__"
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_LINKER="$CLANG"
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_AR="$LLVM_AR"
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_OHOS_RUSTFLAGS="-C link-arg=--target=aarch64-linux-ohos -C link-arg=--sysroot=$SYSROOT"
+
+          cargo build --release --target aarch64-unknown-linux-ohos
+          mkdir -p ../../apps/harmonyos/entry/libs/arm64-v8a
+          cp target/aarch64-unknown-linux-ohos/release/libsecurevault_core.so ../../apps/harmonyos/entry/libs/arm64-v8a/libsecurevault_core.so
+      - name: Build HarmonyOS Unsigned HAP
+        working-directory: apps/harmonyos
+        run: |
+          ohpm install --all
+          hvigorw assembleHap --mode module -p product=default -p buildMode=release --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-harmonyos-hap
+          path: apps/harmonyos/entry/build/default/outputs/default/*.hap
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-android, build-ios, build-harmonyos]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download All Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: release-assets/*
