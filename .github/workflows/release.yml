@@ -57,42 +57,45 @@ jobs:
           path: apps/android/app/build/outputs/apk/debug/*.apk
 
   build-ios:
-    name: Build iOS SwiftUI (Unsigned)
+    name: Build iOS SwiftUI (Unsigned IPA)
     needs: rust-core-test
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-ios-sim
+          targets: aarch64-apple-ios
       - name: Build Rust iOS Staticlib
         run: |
-          cargo build --release --manifest-path core/rust/Cargo.toml --target aarch64-apple-ios-sim
+          cargo build --release --manifest-path core/rust/Cargo.toml --target aarch64-apple-ios
           mkdir -p apps/ios/Libs
-          cp core/rust/target/aarch64-apple-ios-sim/release/libsecurevault_core.a apps/ios/Libs/libsecurevault_core.a
+          cp core/rust/target/aarch64-apple-ios/release/libsecurevault_core.a apps/ios/Libs/libsecurevault_core.a
       - run: brew install xcodegen
       - working-directory: apps/ios
         run: xcodegen generate
-      - name: Build iOS Simulator App (Unsigned)
+      - name: Build iOS App & Package Unsigned IPA
         run: |
           xcodebuild \
             -project apps/ios/Suoxia.xcodeproj \
             -scheme Suoxia \
             -configuration Release \
-            -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
             -derivedDataPath apps/ios/build \
             ARCHS=arm64 \
             ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
             build
-          cd apps/ios/build/Build/Products/Release-iphonesimulator
-          zip -r Suoxia-iOS-Simulator-Unsigned.zip Suoxia.app
+          mkdir -p apps/ios/dist/Payload
+          cp -R apps/ios/build/Build/Products/Release-iphoneos/Suoxia.app apps/ios/dist/Payload/
+          cd apps/ios/dist
+          zip -qry SecureVault-iOS-Unsigned.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
-          name: release-ios-sim
-          path: apps/ios/build/Build/Products/Release-iphonesimulator/Suoxia-iOS-Simulator-Unsigned.zip
+          name: release-ios-ipa
+          path: apps/ios/dist/SecureVault-iOS-Unsigned.ipa
 
   build-harmonyos:
     name: Build HarmonyOS NEXT Unsigned HAP

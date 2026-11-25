@@ -12,16 +12,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Rust iOS Simulator Target
+      - name: Setup Rust iOS Device Target (arm64)
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-ios-sim
+          targets: aarch64-apple-ios
 
-      - name: Build Rust iOS Staticlib
+      - name: Build Rust iOS Staticlib (aarch64-apple-ios)
         run: |
-          cargo build --release --manifest-path core/rust/Cargo.toml --target aarch64-apple-ios-sim
+          cargo build --release --manifest-path core/rust/Cargo.toml --target aarch64-apple-ios
           mkdir -p apps/ios/Libs
-          cp core/rust/target/aarch64-apple-ios-sim/release/libsecurevault_core.a apps/ios/Libs/libsecurevault_core.a
+          cp core/rust/target/aarch64-apple-ios/release/libsecurevault_core.a apps/ios/Libs/libsecurevault_core.a
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -30,16 +30,30 @@ jobs:
         working-directory: apps/ios
         run: xcodegen generate
 
-      - name: Build iOS SwiftUI App (Simulator, Unsigned)
+      - name: Build iOS SwiftUI Debug App & Package Unsigned IPA
         run: |
           xcodebuild \
             -project apps/ios/Suoxia.xcodeproj \
             -scheme Suoxia \
             -configuration Debug \
-            -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath apps/ios/build \
             ARCHS=arm64 \
             ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
             build
+
+          mkdir -p apps/ios/dist/Payload
+          cp -R apps/ios/build/Build/Products/Debug-iphoneos/Suoxia.app apps/ios/dist/Payload/
+          cd apps/ios/dist
+          zip -qry SecureVault-iOS-Debug-Unsigned.ipa Payload
+          ls -lh SecureVault-iOS-Debug-Unsigned.ipa
+
+      - name: Upload iOS Debug Unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: SecureVault-iOS-Debug-IPA
+          path: apps/ios/dist/SecureVault-iOS-Debug-Unsigned.ipa
