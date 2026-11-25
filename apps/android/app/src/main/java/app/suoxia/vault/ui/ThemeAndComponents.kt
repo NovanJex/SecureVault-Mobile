@@ -392,7 +392,7 @@ fun SvPageSheet(
                         modifier = Modifier
                             .size(32.dp)
                             .clip(CircleShape)
-                            .background(p.subBg)
+                            .background(p.sub)
                             .border(0.8.dp, p.border, CircleShape)
                             .clickable { onLeftClick() },
                         contentAlignment = Alignment.Center

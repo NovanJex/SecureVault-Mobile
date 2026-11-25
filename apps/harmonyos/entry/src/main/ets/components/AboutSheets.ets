@@ -97,7 +97,7 @@ export struct AboutSheet {
           .width(32)
           .height(32)
           .borderRadius(16)
-          .backgroundColor(this.p().subBg)
+          .backgroundColor(this.p().bgSub)
           .border({ width: 0.8, color: this.p().border })
           .justifyContent(FlexAlign.Center)
           .alignItems(VerticalAlign.Center)

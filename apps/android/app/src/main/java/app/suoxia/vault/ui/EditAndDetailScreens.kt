@@ -88,7 +88,7 @@ fun DetailPage(
                         .align(Alignment.CenterStart)
                         .size(32.dp)
                         .clip(CircleShape)
-                        .background(p.subBg)
+                        .background(p.sub)
                         .border(0.8.dp, p.border, CircleShape)
                         .clickable { onBack() },
                     contentAlignment = Alignment.Center
