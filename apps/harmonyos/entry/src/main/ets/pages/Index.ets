@@ -1,4 +1,5 @@
 import { common } from '@kit.AbilityKit';
+import { promptAction } from '@kit.ArkUI';
 import { RustCoreBridge } from '../bridge/RustCoreBridge';
 import { AboutSheet } from '../components/AboutSheets';
 import {
@@ -92,9 +93,8 @@ struct Index {
   @Local showExportSheet: boolean = false;
 
   // Centered Dialogs (Tier 4)
-  @Local confirmDialog: ConfirmDialogRequest | null = null;
-  @Local externalLinkDialog: ExternalLinkRequest | null = null;
   @Local remotePwdInput: string = '';
+  @Local remotePwdSubmitting: boolean = false;
   @Local showKdbxExportDialog: boolean = false;
   @Local kdbxExportPwd: string = '';
 
@@ -257,6 +257,40 @@ struct Index {
     return host.length > 0 ? `${host} · ${syncPart}` : syncPart;
   }
 
+  private requestConfirm(req: ConfirmDialogRequest): void {
+    const buttons: [promptAction.Button, promptAction.Button] = [
+      { text: t('取消'), color: '#64748B' },
+      { text: req.confirmLabel, color: req.isDanger ? '#E11D48' : '#4F46E5' },
+    ];
+    this.getUIContext().getPromptAction().showDialog({
+      title: req.title,
+      message: req.message,
+      buttons: buttons,
+    }).then((res: promptAction.ShowDialogSuccessResponse) => {
+      if (res.index === 1) {
+        req.onConfirm();
+      }
+    }).catch(() => {});
+  }
+
+  private requestExternalLink(req: ExternalLinkRequest): void {
+    const buttons: [promptAction.Button, promptAction.Button] = [
+      { text: t('取消'), color: '#64748B' },
+      { text: t('前往打开'), color: '#4F46E5' },
+    ];
+    this.getUIContext().getPromptAction().showDialog({
+      title: tf('将在浏览器中打开{title}', 'Open {title} in Browser', { 'title': req.title }),
+      message: req.url,
+      buttons: buttons,
+    }).then((res: promptAction.ShowDialogSuccessResponse) => {
+      if (res.index === 1) {
+        const ctx = getContext(this) as common.UIAbilityContext;
+        SecurityService.openExternalUrl(ctx, req.url);
+        vaultStore.showToast(t('已在浏览器打开'));
+      }
+    }).catch(() => {});
+  }
+
   private async runExportJson(): Promise<void> {
     this.showExportSheet = false;
     const ctx = getContext(this) as common.UIAbilityContext;
@@ -284,7 +318,7 @@ struct Index {
     const fileName = `SecureVault_${formatDateStamp()}.kdbx`;
     const tempPath = vaultStore.getTempPath(fileName);
     try {
-      vaultStore.exportKdbxToTemp(tempPath, password);
+      await vaultStore.exportKdbxToTemp(tempPath, password);
       const savedName = await SecurityService.saveTempFileToPicker(ctx, tempPath, fileName);
       if (savedName) {
         vaultStore.showToast(tf('已保存：{f}', 'Saved: {f}', { 'f': savedName }));
@@ -315,16 +349,91 @@ struct Index {
       .width('100%')
       .height('100%')
       .backgroundColor(this.p().bgPage)
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
 
-      // Tier 4 Centered Alert Dialog: Generic Binary Confirmation
-      if (this.confirmDialog !== null) {
-        this.CenteredConfirmOverlay(this.confirmDialog as ConfirmDialogRequest)
-      }
-
-      // Tier 4 Centered Alert Dialog: External Link Confirmation
-      if (this.externalLinkDialog !== null) {
-        this.ExternalLinkOverlay(this.externalLinkDialog as ExternalLinkRequest)
-      }
+      // Dedicated zero-size bindSheet anchors (ArkUI allows only ONE bindSheet per component node)
+      Row().width(0).height(0).bindSheet($$this.showCreateVaultSheet, this.CreateVaultSheetBuilder(), {
+        detents: [SheetSize.FIT_CONTENT, SheetSize.LARGE],
+        dragBar: true,
+        backgroundColor: this.p().bgPage,
+      })
+      Row().width(0).height(0).bindSheet($$this.showRestoreActionSheet, this.RestoreActionSheetBuilder(), {
+        detents: [SheetSize.FIT_CONTENT],
+        dragBar: true,
+        backgroundColor: this.p().bgPage,
+      })
+      Row().width(0).height(0).bindSheet($$this.showEditSheet, this.EditSheetBuilder(), {
+        detents: [SheetSize.LARGE],
+        dragBar: true,
+        backgroundColor: this.p().bgPage,
+      })
+      Row().width(0).height(0).bindSheet($$this.showAddTotpSheet, this.AddTotpSheetBuilder(), {
+        detents: [SheetSize.FIT_CONTENT, SheetSize.LARGE],
+        dragBar: true,
+        backgroundColor: this.p().bgPage,
+      })
+      Row().width(0).height(0).bindSheet($$this.showFolderSheet, this.FolderSheetBuilder(), {
+        detents: [SheetSize.FIT_CONTENT, SheetSize.LARGE],
+        dragBar: true,
+        backgroundColor: this.p().bgPage,
+      })
+      Row().width(0).height(0).bindSheet($$this.showTrashSheet, this.TrashSheetBuilder(), {
+        detents: [SheetSize.LARGE],
+        dragBar: true,
+        backgroundColor: this.p().bgPage,
+      })
+      Row().width(0).height(0).bindSheet($$this.showGestureSetup, this.GestureSheetBuilder(), {
+        detents: [SheetSize.FIT_CONTENT],
+        dragBar: true,
+        backgroundColor: this.p().bgPage,
+      })
+      Row().width(0).height(0).bindSheet($$this.showWebDavSheet, this.WebDavSheetBuilder(), {
+        detents: [SheetSize.LARGE],
+        dragBar: true,
+        backgroundColor: this.p().bgPage,
+      })
+      Row().width(0).height(0).bindSheet($$this.showImportSheet, this.ImportSheetBuilder(), {
+        detents: [SheetSize.LARGE],
+        dragBar: true,
+        backgroundColor: this.p().bgPage,
+      })
+      Row().width(0).height(0).bindSheet($$this.showChangePwdSheet, this.ChangePwdSheetBuilder(), {
+        detents: [SheetSize.FIT_CONTENT, SheetSize.LARGE],
+        dragBar: true,
+        backgroundColor: this.p().bgPage,
+      })
+      Row().width(0).height(0).bindSheet($$this.showAboutSheet, this.AboutSheetBuilder(), {
+        detents: [SheetSize.LARGE],
+        dragBar: true,
+        backgroundColor: this.p().bgPage,
+      })
+      Row().width(0).height(0).bindSheet($$this.showVerifyPwdSheet, this.VerifyPwdSheetBuilder(), {
+        detents: [SheetSize.FIT_CONTENT],
+        dragBar: true,
+        backgroundColor: this.p().bgPage,
+        onDisappear: () => {
+          this.pendingBioTarget = '';
+          this.bioSyncTick += 1;
+        },
+      })
+      Row().width(0).height(0).bindSheet($$this.showAutoLockSheet, this.AutoLockActionSheetBuilder(), {
+        detents: [SheetSize.FIT_CONTENT],
+        dragBar: true,
+        backgroundColor: this.p().bgPage,
+      })
+      Row().width(0).height(0).bindSheet($$this.showExportSheet, this.ExportActionSheetBuilder(), {
+        detents: [SheetSize.FIT_CONTENT],
+        dragBar: true,
+        backgroundColor: this.p().bgPage,
+      })
+      Row().width(0).height(0).bindSheet(vaultStore.showWebDavConflict, this.WebDavConflictActionSheetBuilder(), {
+        detents: [SheetSize.FIT_CONTENT],
+        dragBar: true,
+        backgroundColor: this.p().bgPage,
+        onDisappear: () => {
+          vaultStore.showWebDavConflict = false;
+        },
+      })
 
       // Tier 4 Centered Alert Dialog: Remote Salt Master Password Prompt
       if (vaultStore.showRemotePwdPrompt) {
@@ -335,90 +444,11 @@ struct Index {
       if (this.showKdbxExportDialog) {
         this.KdbxExportPwdOverlay()
       }
-
-      // Bottom Toast HUD
-      if (vaultStore.toastVisible) {
-        Row({ space: 8 }) {
-          Text(vaultStore.toastIsWarn ? '!' : '✓')
-            .fontSize(13)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(vaultStore.toastIsWarn ? '#FBBF24' : '#34D399')
-          Text(vaultStore.toastMsg)
-            .fontSize(12)
-            .fontColor('#FFFFFF')
-            .maxLines(2)
-        }
-        .padding({ left: 16, right: 16, top: 10, bottom: 10 })
-        .backgroundColor('#F20F172A')
-        .borderRadius(24)
-        .margin({ bottom: 84, left: 24, right: 24 })
-      }
     }
     .width('100%')
     .height('100%')
-    .bindSheet($$this.showCreateVaultSheet, this.CreateVaultSheetBuilder(), {
-      detents: [SheetSize.FIT_CONTENT, SheetSize.LARGE],
-      dragBar: true,
-    })
-    .bindSheet($$this.showRestoreActionSheet, this.RestoreActionSheetBuilder(), {
-      detents: [SheetSize.FIT_CONTENT],
-      dragBar: true,
-    })
-    .bindSheet($$this.showEditSheet, this.EditSheetBuilder(), {
-      detents: [SheetSize.LARGE],
-      dragBar: true,
-    })
-    .bindSheet($$this.showAddTotpSheet, this.AddTotpSheetBuilder(), {
-      detents: [SheetSize.FIT_CONTENT, SheetSize.LARGE],
-      dragBar: true,
-    })
-    .bindSheet($$this.showFolderSheet, this.FolderSheetBuilder(), {
-      detents: [SheetSize.FIT_CONTENT, SheetSize.LARGE],
-      dragBar: true,
-    })
-    .bindSheet($$this.showTrashSheet, this.TrashSheetBuilder(), {
-      detents: [SheetSize.LARGE],
-      dragBar: true,
-    })
-    .bindSheet($$this.showGestureSetup, this.GestureSheetBuilder(), {
-      detents: [SheetSize.FIT_CONTENT],
-      dragBar: true,
-    })
-    .bindSheet($$this.showWebDavSheet, this.WebDavSheetBuilder(), {
-      detents: [SheetSize.LARGE],
-      dragBar: true,
-    })
-    .bindSheet($$this.showImportSheet, this.ImportSheetBuilder(), {
-      detents: [SheetSize.LARGE],
-      dragBar: true,
-    })
-    .bindSheet($$this.showChangePwdSheet, this.ChangePwdSheetBuilder(), {
-      detents: [SheetSize.FIT_CONTENT, SheetSize.LARGE],
-      dragBar: true,
-    })
-    .bindSheet($$this.showAboutSheet, this.AboutSheetBuilder(), {
-      detents: [SheetSize.LARGE],
-      dragBar: true,
-    })
-    .bindSheet($$this.showVerifyPwdSheet, this.VerifyPwdSheetBuilder(), {
-      detents: [SheetSize.FIT_CONTENT],
-      dragBar: true,
-    })
-    .bindSheet($$this.showAutoLockSheet, this.AutoLockActionSheetBuilder(), {
-      detents: [SheetSize.FIT_CONTENT],
-      dragBar: true,
-    })
-    .bindSheet($$this.showExportSheet, this.ExportActionSheetBuilder(), {
-      detents: [SheetSize.FIT_CONTENT],
-      dragBar: true,
-    })
-    .bindSheet(vaultStore.showWebDavConflict, this.WebDavConflictActionSheetBuilder(), {
-      detents: [SheetSize.FIT_CONTENT],
-      dragBar: true,
-      onDisappear: () => {
-        vaultStore.showWebDavConflict = false;
-      },
-    })
+    .backgroundColor(this.p().bgPage)
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 
   // ---- Sheet Builders ----
@@ -452,7 +482,9 @@ struct Index {
         .onClick(() => {
           this.showRestoreActionSheet = false;
           this.webdavOnboardingMode = true;
-          this.showWebDavSheet = true;
+          setTimeout(() => {
+            this.showWebDavSheet = true;
+          }, 280);
         })
 
       Button(t('导入本地备份文件'))
@@ -466,7 +498,9 @@ struct Index {
         .border({ width: 1, color: this.p().border })
         .onClick(() => {
           this.showRestoreActionSheet = false;
-          this.showImportSheet = true;
+          setTimeout(() => {
+            this.showImportSheet = true;
+          }, 280);
         })
 
       Button(t('取消'))
@@ -517,7 +551,7 @@ struct Index {
         this.showFolderSheet = false;
       },
       onRequestConfirm: (req: ConfirmDialogRequest) => {
-        this.confirmDialog = req;
+        this.requestConfirm(req);
       },
     })
   }
@@ -529,7 +563,7 @@ struct Index {
         this.showTrashSheet = false;
       },
       onRequestConfirm: (req: ConfirmDialogRequest) => {
-        this.confirmDialog = req;
+        this.requestConfirm(req);
       },
     })
   }
@@ -552,7 +586,7 @@ struct Index {
         this.webdavOnboardingMode = false;
       },
       onRequestConfirm: (req: ConfirmDialogRequest) => {
-        this.confirmDialog = req;
+        this.requestConfirm(req);
       },
     })
   }
@@ -564,7 +598,7 @@ struct Index {
         this.showImportSheet = false;
       },
       onRequestConfirm: (req: ConfirmDialogRequest) => {
-        this.confirmDialog = req;
+        this.requestConfirm(req);
       },
     })
   }
@@ -585,7 +619,7 @@ struct Index {
         this.showAboutSheet = false;
       },
       onOpenExternalLink: (req: ExternalLinkRequest) => {
-        this.externalLinkDialog = req;
+        this.requestExternalLink(req);
       },
     })
   }
@@ -697,7 +731,9 @@ struct Index {
         .onClick(() => {
           this.showExportSheet = false;
           this.kdbxExportPwd = '';
-          this.showKdbxExportDialog = true;
+          setTimeout(() => {
+            this.showKdbxExportDialog = true;
+          }, 260);
         })
       }
       .width('100%')
@@ -764,124 +800,6 @@ struct Index {
 
   // ---- Tier 4 Centered Alert Dialog Overlays ----
   @Builder
-  CenteredConfirmOverlay(req: ConfirmDialogRequest) {
-    Stack() {
-      Column({ space: 14 }) {
-        Text(req.title)
-          .fontSize(15)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.p().fgMain)
-          .textAlign(TextAlign.Center)
-
-        Text(req.message)
-          .fontSize(12)
-          .lineHeight(18)
-          .fontColor(this.p().fgMain)
-          .opacity(0.65)
-          .textAlign(TextAlign.Center)
-
-        Row({ space: 10 }) {
-          Button(t('取消'))
-            .layoutWeight(1)
-            .height(40)
-            .borderRadius(12)
-            .fontSize(13)
-            .backgroundColor(this.p().bgSub)
-            .fontColor(this.p().fgMain)
-            .border({ width: 1, color: this.p().border })
-            .onClick(() => {
-              this.confirmDialog = null;
-            })
-          Button(req.confirmLabel)
-            .layoutWeight(1)
-            .height(40)
-            .borderRadius(12)
-            .fontSize(13)
-            .fontWeight(FontWeight.Medium)
-            .backgroundColor(req.isDanger ? this.p().danger : this.p().brand)
-            .fontColor('#FFFFFF')
-            .onClick(() => {
-              const fn = req.onConfirm;
-              this.confirmDialog = null;
-              fn();
-            })
-        }.width('100%')
-      }
-      .width('84%')
-      .constraintSize({ maxWidth: 320 })
-      .padding(20)
-      .borderRadius(20)
-      .backgroundColor(this.p().bgCard)
-      .border({ width: 1, color: this.p().border })
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor('#66000000')
-  }
-
-  @Builder
-  ExternalLinkOverlay(req: ExternalLinkRequest) {
-    Stack() {
-      Column({ space: 14 }) {
-        Text(tf('将在浏览器中打开{title}', 'Open {title} in Browser', { 'title': req.title }))
-          .fontSize(15)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.p().fgMain)
-          .textAlign(TextAlign.Center)
-
-        Text(req.url)
-          .fontSize(11)
-          .fontColor(this.p().fgMain)
-          .opacity(0.75)
-          .textAlign(TextAlign.Center)
-          .width('100%')
-          .padding(10)
-          .borderRadius(12)
-          .backgroundColor(this.p().bgSub)
-          .border({ width: 1, color: this.p().border })
-
-        Row({ space: 10 }) {
-          Button(t('取消'))
-            .layoutWeight(1)
-            .height(40)
-            .borderRadius(12)
-            .fontSize(13)
-            .backgroundColor(this.p().bgSub)
-            .fontColor(this.p().fgMain)
-            .border({ width: 1, color: this.p().border })
-            .onClick(() => {
-              this.externalLinkDialog = null;
-            })
-          Button(t('前往打开'))
-            .layoutWeight(1)
-            .height(40)
-            .borderRadius(12)
-            .fontSize(13)
-            .fontWeight(FontWeight.Medium)
-            .backgroundColor(this.p().brand)
-            .fontColor('#FFFFFF')
-            .onClick(() => {
-              const url = req.url;
-              this.externalLinkDialog = null;
-              const ctx = getContext(this) as common.UIAbilityContext;
-              SecurityService.openExternalUrl(ctx, url);
-              vaultStore.showToast(t('已在浏览器打开'));
-            })
-        }.width('100%')
-      }
-      .width('84%')
-      .constraintSize({ maxWidth: 320 })
-      .padding(20)
-      .borderRadius(20)
-      .backgroundColor(this.p().bgCard)
-      .border({ width: 1, color: this.p().border })
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor('#66000000')
-  }
-
-  @Builder
   RemoteMasterPwdOverlay() {
     Stack() {
       Column({ space: 14 }) {
@@ -929,11 +847,12 @@ struct Index {
             .backgroundColor(this.p().bgSub)
             .fontColor(this.p().fgMain)
             .border({ width: 1, color: this.p().border })
+            .enabled(!this.remotePwdSubmitting)
             .onClick(() => {
               this.remotePwdInput = '';
               vaultStore.cancelRemoteMasterPassword();
             })
-          Button(t('解密并同步'))
+          Button(this.remotePwdSubmitting ? t('处理中...') : t('解密并同步'))
             .layoutWeight(1)
             .height(40)
             .borderRadius(12)
@@ -941,9 +860,16 @@ struct Index {
             .fontWeight(FontWeight.Medium)
             .backgroundColor(this.p().brand)
             .fontColor('#FFFFFF')
-            .onClick(() => {
-              if (vaultStore.submitRemoteMasterPassword(this.remotePwdInput)) {
-                this.remotePwdInput = '';
+            .enabled(!this.remotePwdSubmitting)
+            .onClick(async () => {
+              this.remotePwdSubmitting = true;
+              try {
+                const ok = await vaultStore.submitRemoteMasterPassword(this.remotePwdInput);
+                if (ok) {
+                  this.remotePwdInput = '';
+                }
+              } finally {
+                this.remotePwdSubmitting = false;
               }
             })
         }.width('100%')
@@ -958,6 +884,7 @@ struct Index {
     .width('100%')
     .height('100%')
     .backgroundColor('#66000000')
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 
   @Builder
@@ -1035,6 +962,7 @@ struct Index {
     .width('100%')
     .height('100%')
     .backgroundColor('#66000000')
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 
   // ---- Main 4-Tab Shell ----
@@ -1054,7 +982,7 @@ struct Index {
               this.showEditSheet = true;
             },
             onRequestConfirm: (req: ConfirmDialogRequest) => {
-              this.confirmDialog = req;
+              this.requestConfirm(req);
             },
           })
         } else if (vaultStore.activeTab === 'vault') {
@@ -1081,6 +1009,7 @@ struct Index {
         .height(60)
         .backgroundColor(this.p().bgCard)
         .border({ width: { top: 0.5 }, color: this.p().divider })
+        .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
       }
     }
     .width('100%')
@@ -1481,7 +1410,7 @@ struct Index {
           .fontColor(this.p().danger)
           .opacity(0.75)
           .onClick(() => {
-            this.confirmDialog = {
+            this.requestConfirm({
               title: t('移除动态令牌？'),
               message: t('移除后将不再生成该服务的动态验证码，请确认已在对应平台解绑或保留了备份密钥。'),
               confirmLabel: t('确认移除'),
@@ -1489,7 +1418,7 @@ struct Index {
               onConfirm: () => {
                 vaultStore.removeStandaloneTotp(tok.id);
               },
-            };
+            });
           })
       }.alignItems(HorizontalAlign.Center)
     }
@@ -1708,7 +1637,7 @@ struct Index {
                 .fontWeight(FontWeight.Medium)
                 .fontColor(this.p().danger)
                 .onClick(() => {
-                  this.confirmDialog = {
+                  this.requestConfirm({
                     title: t('清空最近生成记录？'),
                     message: t('清空后将无法找回此前生成的临时密码，请确认重要密码已保存至保险箱。'),
                     confirmLabel: t('确认清空'),
@@ -1716,7 +1645,7 @@ struct Index {
                     onConfirm: () => {
                       vaultStore.clearGenHistory();
                     },
-                  };
+                  });
                 })
             }
           }.width('100%').padding({ left: 4, right: 4 }).justifyContent(FlexAlign.SpaceBetween)
@@ -1783,6 +1712,26 @@ struct Index {
     .padding({ left: 16, right: 16, top: 10, bottom: 10 })
   }
 
+  @Builder
+  ControlledSwitch(isOn: boolean, onToggle: (next: boolean) => void) {
+    Stack({ alignContent: Alignment.Start }) {
+      Circle({ width: 22, height: 22 })
+        .fill('#FFFFFF')
+        .shadow({ radius: 3, color: '#26000000', offsetY: 1 })
+        .translate({ x: isOn ? 18 : 0 })
+        .animation({ duration: 180, curve: Curve.EaseInOut })
+    }
+    .width(44)
+    .height(26)
+    .padding(2)
+    .borderRadius(13)
+    .backgroundColor(isOn ? this.p().brand : this.p().segTrack)
+    .animation({ duration: 180, curve: Curve.EaseInOut })
+    .onClick(() => {
+      onToggle(!isOn);
+    })
+  }
+
   // ---- TAB 4: PREFERENCES ----
   @Builder
   PreferencesTab() {
@@ -1838,18 +1787,15 @@ struct Index {
                   Text(t('面容识别')).fontSize(14).fontWeight(FontWeight.Medium).fontColor(this.p().fgMain)
                   Text(t('设备支持时优先使用面容解锁')).fontSize(11).fontColor(this.p().fgMain).opacity(0.55)
                 }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-                Toggle({ type: ToggleType.Switch, isOn: vaultStore.bioFaceOn })
-                  .id(`bio_face_${this.bioSyncTick}`)
-                  .selectedColor(this.p().brand)
-                  .onChange((on: boolean) => {
-                    if (on && !vaultStore.bioFaceOn) {
-                      this.pendingBioTarget = 'face';
-                      this.showVerifyPwdSheet = true;
-                    } else if (!on && vaultStore.bioFaceOn) {
-                      vaultStore.bioFaceOn = false;
-                      vaultStore.saveMeta();
-                    }
-                  })
+                this.ControlledSwitch(vaultStore.bioFaceOn, (on: boolean) => {
+                  if (on && !vaultStore.bioFaceOn) {
+                    this.pendingBioTarget = 'face';
+                    this.showVerifyPwdSheet = true;
+                  } else if (!on && vaultStore.bioFaceOn) {
+                    vaultStore.bioFaceOn = false;
+                    vaultStore.saveMeta();
+                  }
+                })
               }.width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
 
               Divider().strokeWidth(0.5).color(this.p().divider).margin({ left: 16 })
@@ -1858,18 +1804,15 @@ struct Index {
                   Text(t('指纹识别')).fontSize(14).fontWeight(FontWeight.Medium).fontColor(this.p().fgMain)
                   Text(t('面容不可用或失败时快速切换指纹')).fontSize(11).fontColor(this.p().fgMain).opacity(0.55)
                 }.layoutWeight(1).alignItems(HorizontalAlign.Start)
-                Toggle({ type: ToggleType.Switch, isOn: vaultStore.bioFingerOn })
-                  .id(`bio_finger_${this.bioSyncTick}`)
-                  .selectedColor(this.p().brand)
-                  .onChange((on: boolean) => {
-                    if (on && !vaultStore.bioFingerOn) {
-                      this.pendingBioTarget = 'finger';
-                      this.showVerifyPwdSheet = true;
-                    } else if (!on && vaultStore.bioFingerOn) {
-                      vaultStore.bioFingerOn = false;
-                      vaultStore.saveMeta();
-                    }
-                  })
+                this.ControlledSwitch(vaultStore.bioFingerOn, (on: boolean) => {
+                  if (on && !vaultStore.bioFingerOn) {
+                    this.pendingBioTarget = 'finger';
+                    this.showVerifyPwdSheet = true;
+                  } else if (!on && vaultStore.bioFingerOn) {
+                    vaultStore.bioFingerOn = false;
+                    vaultStore.saveMeta();
+                  }
+                })
               }.width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
 
               Divider().strokeWidth(0.5).color(this.p().divider).margin({ left: 16 })
@@ -2033,6 +1976,7 @@ struct Index {
                   .onClick(() => {
                     vaultStore.theme = 'light';
                     vaultStore.saveMeta();
+                    SecurityService.applyImmersiveSystemBars(false);
                   })
                 Text(t('深色'))
                   .fontSize(12)
@@ -2044,6 +1988,7 @@ struct Index {
                   .onClick(() => {
                     vaultStore.theme = 'dark';
                     vaultStore.saveMeta();
+                    SecurityService.applyImmersiveSystemBars(true);
                   })
               }
               .padding(3)

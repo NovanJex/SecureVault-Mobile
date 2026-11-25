@@ -397,11 +397,16 @@ struct WebDavSheet: View {
             }
         }
         .background(AppTheme.pageBackground(store.isDark).ignoresSafeArea())
+        .svToastOverlay(store: store)
         .onAppear {
+            store.isWebDavSheetOpen = true
             if !isOnboardingRestore {
                 urlInput = store.webdavUrl
                 userInput = store.webdavUser
             }
+        }
+        .onDisappear {
+            store.isWebDavSheetOpen = false
         }
         .alert(t("断开 WebDAV 同步？"), isPresented: $confirmDisconnect) {
             Button(t("取消"), role: .cancel) {}
@@ -413,6 +418,34 @@ struct WebDavSheet: View {
             }
         } message: {
             Text(t("将清除本机保存的服务器地址与密码，不会删除你本机或云端已有的备份数据。"))
+        }
+        .confirmationDialog(
+            t("发现同步冲突"),
+            isPresented: Binding(
+                get: { store.isWebDavSheetOpen && store.showWebdavConflictSheet },
+                set: { if !$0 { store.showWebdavConflictSheet = false } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(t("用本机覆盖云端")) {
+                Task { await store.resolveConflictKeepLocal() }
+            }
+            Button(t("用云端覆盖本机")) {
+                Task { await store.resolveConflictUseRemote() }
+            }
+            Button(t("取消"), role: .cancel) {}
+        } message: {
+            Text(t("本机与云端的备份数据均有更新，请选择保留哪一份："))
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { store.isWebDavSheetOpen && store.showRemotePasswordPrompt },
+                set: { if !$0 { store.cancelRemotePasswordPrompt() } }
+            )
+        ) {
+            RemotePasswordPromptSheet(store: store)
+                .svSheetPresentation(.compact(270))
+                .interactiveDismissDisabled(true)
         }
     }
 
@@ -472,23 +505,34 @@ struct RemotePasswordPromptSheet: View {
                         .cornerRadius(12)
                         .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppTheme.borderColor(store.isDark), lineWidth: 0.8))
                 }
+                .disabled(store.isBusy)
 
                 Button {
-                    _ = store.unlockAndApplyRemoteVault(password: pwd)
+                    let input = pwd
+                    Task {
+                        _ = await store.unlockAndApplyRemoteVault(password: input)
+                    }
                 } label: {
-                    Text(t("解密并同步"))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 44)
-                        .background(AppTheme.brand)
-                        .cornerRadius(12)
+                    HStack(spacing: 6) {
+                        if store.isBusy {
+                            ProgressView().tint(.white)
+                        }
+                        Text(t("解密并同步"))
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .background(AppTheme.brand)
+                    .cornerRadius(12)
                 }
+                .disabled(store.isBusy)
             }
             .padding(.bottom, 16)
         }
         .padding(.horizontal, 20)
         .background(AppTheme.pageBackground(store.isDark).ignoresSafeArea())
+        .svToastOverlay(store: store)
     }
 }
 
@@ -557,6 +601,7 @@ struct ImportFlowSheet: View {
             }
         }
         .background(AppTheme.pageBackground(store.isDark).ignoresSafeArea())
+        .svToastOverlay(store: store)
         .fileImporter(
             isPresented: $showFileImporter,
             allowedContentTypes: allowedTypes,
@@ -572,13 +617,16 @@ struct ImportFlowSheet: View {
                 if store.checkIfFileNeedsPassword(url: url, kind: selectedKind) {
                     step = .decrypt
                 } else {
-                    do {
-                        let parsed = try store.parseImportFile(url: url, kind: selectedKind, password: nil)
-                        parsedResult = parsed
-                        strategy = .skip
-                        step = .preview
-                    } catch {
-                        store.showToast(error.localizedDescription, warn: true)
+                    let kind = selectedKind
+                    Task {
+                        do {
+                            let parsed = try await store.parseImportFile(url: url, kind: kind, password: nil)
+                            parsedResult = parsed
+                            strategy = .skip
+                            step = .preview
+                        } catch {
+                            store.showToast(error.localizedDescription, warn: true)
+                        }
                     }
                 }
             }
@@ -683,30 +731,39 @@ struct ImportFlowSheet: View {
                 )
 
                 Button {
-                    let pwd = filePassword.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let pwd = filePassword
                     guard !pwd.isEmpty else {
                         store.showToast(t("请输入备份文件解密密码"), warn: true)
                         return
                     }
                     guard let url = pickedFileURL else { return }
-                    do {
-                        let parsed = try store.parseImportFile(url: url, kind: selectedKind, password: pwd)
-                        parsedResult = parsed
-                        strategy = .skip
-                        step = .preview
-                        store.showToast(t("备份文件解密成功"))
-                    } catch {
-                        store.showToast(error.localizedDescription, warn: true)
+                    let kind = selectedKind
+                    Task {
+                        do {
+                            let parsed = try await store.parseImportFile(url: url, kind: kind, password: pwd)
+                            parsedResult = parsed
+                            strategy = .skip
+                            step = .preview
+                            store.showToast(t("备份文件解密成功"))
+                        } catch {
+                            store.showToast(error.localizedDescription, warn: true)
+                        }
                     }
                 } label: {
-                    Text(t("解密并解析文件"))
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 46)
-                        .background(AppTheme.brand)
-                        .cornerRadius(16)
+                    HStack(spacing: 8) {
+                        if store.isBusy {
+                            ProgressView().tint(.white)
+                        }
+                        Text(t("解密并解析文件"))
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .background(AppTheme.brand)
+                    .cornerRadius(16)
                 }
+                .disabled(store.isBusy)
             }
             .padding(16)
         }
@@ -884,16 +941,22 @@ struct ImportFlowSheet: View {
                         finishImport(parsed)
                     }
                 } label: {
-                    Text(strategy == .overwrite
-                         ? (AppI18n.isChinese ? "覆盖并导入（\(finalCount) 条）" : "Overwrite & Import (\(finalCount))")
-                         : (AppI18n.isChinese ? "确认导入（\(finalCount) 条）" : "Confirm Import (\(finalCount))"))
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 46)
-                        .background(strategy == .overwrite ? AppTheme.danger : AppTheme.brand)
-                        .cornerRadius(16)
+                    HStack(spacing: 8) {
+                        if store.isBusy {
+                            ProgressView().tint(.white)
+                        }
+                        Text(strategy == .overwrite
+                             ? (AppI18n.isChinese ? "覆盖并导入（\(finalCount) 条）" : "Overwrite & Import (\(finalCount))")
+                             : (AppI18n.isChinese ? "确认导入（\(finalCount) 条）" : "Confirm Import (\(finalCount))"))
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 46)
+                    .background(strategy == .overwrite ? AppTheme.danger : AppTheme.brand)
+                    .cornerRadius(16)
                 }
+                .disabled(store.isBusy)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
@@ -962,11 +1025,15 @@ struct ImportFlowSheet: View {
     }
 
     private func finishImport(_ parsed: ParsedImportResult) {
-        let ok = store.executeImport(
-            parsed: parsed,
-            strategy: store.hasVault ? strategy : .merge,
-            newMasterPassword: store.hasVault ? nil : newMasterPwd1
-        )
-        if ok { dismiss() }
+        let chosenStrategy: ImportStrategy = store.hasVault ? strategy : .merge
+        let newPwd: String? = store.hasVault ? nil : newMasterPwd1
+        Task {
+            let ok = await store.executeImport(
+                parsed: parsed,
+                strategy: chosenStrategy,
+                newMasterPassword: newPwd
+            )
+            if ok { dismiss() }
+        }
     }
 }

@@ -127,6 +127,7 @@ struct CredentialDetailView: View {
                     .padding(16)
                 }
                 .background(AppTheme.pageBackground(store.isDark).ignoresSafeArea())
+                .navigationBarHidden(false)
                 .navigationTitle(it.title)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -487,6 +488,17 @@ struct CredentialDetailView: View {
 
 // MARK: - New / Edit Credential Sheet
 
+private enum ActiveEditSubSheet: Identifiable {
+    case quickGen, qrScanner
+
+    var id: Int {
+        switch self {
+        case .quickGen: return 0
+        case .qrScanner: return 1
+        }
+    }
+}
+
 struct CredentialEditSheet: View {
     @ObservedObject var store: VaultStore
     let editItem: VaultItem?
@@ -511,8 +523,7 @@ struct CredentialEditSheet: View {
     @State private var identityAddress = ""
     @State private var notes = ""
 
-    @State private var showQuickGen = false
-    @State private var showQrScanner = false
+    @State private var activeSubSheet: ActiveEditSubSheet? = nil
 
     private var allFolderChoices: [String] {
         [VaultHelpers.defaultFolderKey] + store.folders.map { $0.name }
@@ -635,7 +646,7 @@ struct CredentialEditSheet: View {
                                 isMonospace: true,
                                 showEyeToggle: true,
                                 trailingLabelText: t("生成强密码"),
-                                trailingAction: { showQuickGen = true }
+                                trailingAction: { activeSubSheet = .quickGen }
                             )
                             FormTextFieldBox(
                                 label: t("网址 / 域名（可选）"),
@@ -651,7 +662,7 @@ struct CredentialEditSheet: View {
                                 isDark: store.isDark,
                                 isMonospace: true,
                                 trailingLabelText: t("相机扫码"),
-                                trailingAction: { showQrScanner = true }
+                                trailingAction: { activeSubSheet = .qrScanner }
                             )
                             FormTextAreaBox(
                                 label: t("备注（可选）"),
@@ -755,6 +766,7 @@ struct CredentialEditSheet: View {
             }
         }
         .background(AppTheme.pageBackground(store.isDark).ignoresSafeArea())
+        .svToastOverlay(store: store)
         .onAppear {
             if let it = editItem {
                 itemType = it.type
@@ -779,20 +791,22 @@ struct CredentialEditSheet: View {
                     : VaultHelpers.defaultFolderKey
             }
         }
-        .sheet(isPresented: $showQuickGen) {
-            QuickGenSheet(isDark: store.isDark) { generated in
-                password = generated
-                store.showToast(t("已填入生成的随机密码"))
-            }
-            .svSheetPresentation(.compact(250))
-        }
-        .sheet(isPresented: $showQrScanner) {
-            QrScannerModal(isDark: store.isDark) { scanned in
-                if let parsed = try? SecureVaultCore.parseOtpauthUri(scanned) {
-                    otpSecret = parsed.secret
-                    store.showToast(t("已识别并填入验证密钥"))
-                } else {
-                    store.showToast(t("二维码格式不支持"), warn: true)
+        .sheet(item: $activeSubSheet) { sub in
+            switch sub {
+            case .quickGen:
+                QuickGenSheet(isDark: store.isDark) { generated in
+                    password = generated
+                    store.showToast(t("已填入生成的随机密码"))
+                }
+                .svSheetPresentation(.compact(250))
+            case .qrScanner:
+                QrScannerModal(isDark: store.isDark) { scanned in
+                    if let parsed = try? SecureVaultCore.parseOtpauthUri(scanned) {
+                        otpSecret = parsed.secret
+                        store.showToast(t("已识别并填入验证密钥"))
+                    } else {
+                        store.showToast(t("二维码格式不支持"), warn: true)
+                    }
                 }
             }
         }

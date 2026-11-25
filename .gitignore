@@ -28,6 +28,9 @@ migrate_working_dir/
 .pub/
 /build/
 
+# Local downloaded debug packages
+/dist_debug/
+
 # Rust build artifacts
 /rust/target/
 /core/rust/target/

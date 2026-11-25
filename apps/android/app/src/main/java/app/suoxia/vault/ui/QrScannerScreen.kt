@@ -1,6 +1,7 @@
 package app.suoxia.vault.ui
 
 import android.util.Size
+import androidx.activity.compose.BackHandler
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -33,15 +34,23 @@ import java.util.concurrent.Executors
 @Composable
 fun QrScannerScreen(
     onScanned: (String) -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    onError: (String) -> Unit = { onClose() }
 ) {
+    BackHandler { onClose() }
+
     val lifecycleOwner = LocalLifecycleOwner.current
     val executor = remember { Executors.newSingleThreadExecutor() }
     val scanner = remember { BarcodeScanning.getClient() }
     val handled = remember { mutableStateOf(false) }
+    val disposed = remember { mutableStateOf(false) }
+    val cameraProviderRef = remember { mutableStateOf<ProcessCameraProvider?>(null) }
 
     DisposableEffect(Unit) {
         onDispose {
+            disposed.value = true
+            runCatching { cameraProviderRef.value?.unbindAll() }
+            cameraProviderRef.value = null
             executor.shutdown()
             scanner.close()
         }
@@ -53,34 +62,47 @@ fun QrScannerScreen(
                 val previewView = PreviewView(ctx)
                 val future = ProcessCameraProvider.getInstance(ctx)
                 future.addListener({
-                    val provider = future.get()
-                    val preview = Preview.Builder().build().apply {
-                        setSurfaceProvider(previewView.surfaceProvider)
-                    }
-                    @Suppress("DEPRECATION")
-                    val analysis = ImageAnalysis.Builder()
-                        .setTargetResolution(Size(1280, 720))
-                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                        .build()
-                    analysis.setAnalyzer(executor) { proxy ->
-                        val mediaImage = proxy.image
-                        if (mediaImage != null && !handled.value) {
-                            val img = InputImage.fromMediaImage(mediaImage, proxy.imageInfo.rotationDegrees)
-                            scanner.process(img)
-                                .addOnSuccessListener { codes ->
-                                    val hit = codes.firstOrNull()?.rawValue
-                                    if (!hit.isNullOrBlank() && !handled.value) {
-                                        handled.value = true
-                                        onScanned(hit)
+                    if (disposed.value) return@addListener
+                    try {
+                        val provider = future.get()
+                        cameraProviderRef.value = provider
+                        val preview = Preview.Builder().build().apply {
+                            setSurfaceProvider(previewView.surfaceProvider)
+                        }
+                        @Suppress("DEPRECATION")
+                        val analysis = ImageAnalysis.Builder()
+                            .setTargetResolution(Size(1280, 720))
+                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                            .build()
+                        analysis.setAnalyzer(executor) { proxy ->
+                            val mediaImage = proxy.image
+                            if (mediaImage != null && !handled.value && !disposed.value) {
+                                val img = InputImage.fromMediaImage(mediaImage, proxy.imageInfo.rotationDegrees)
+                                scanner.process(img)
+                                    .addOnSuccessListener { codes ->
+                                        val hit = codes.firstOrNull()?.rawValue
+                                        if (!hit.isNullOrBlank() && !handled.value && !disposed.value) {
+                                            handled.value = true
+                                            onScanned(hit)
+                                        }
                                     }
-                                }
-                                .addOnCompleteListener { proxy.close() }
-                        } else {
-                            proxy.close()
+                                    .addOnCompleteListener { proxy.close() }
+                            } else {
+                                proxy.close()
+                            }
+                        }
+                        provider.unbindAll()
+                        try {
+                            provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+                        } catch (_: Exception) {
+                            provider.unbindAll()
+                            provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_FRONT_CAMERA, preview, analysis)
+                        }
+                    } catch (_: Exception) {
+                        if (!disposed.value) {
+                            onError(t("无法启动相机，请检查相机权限或设备状态"))
                         }
                     }
-                    provider.unbindAll()
-                    provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
                 }, ContextCompat.getMainExecutor(ctx))
                 previewView
             },

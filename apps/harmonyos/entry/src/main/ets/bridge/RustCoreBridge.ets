@@ -60,6 +60,18 @@ export class RustCoreBridge {
     });
   }
 
+  static async deriveMasterKeyAsync(
+    password: string,
+    saltB64: string,
+    kdf: string = 'argon2id'
+  ): Promise<string> {
+    return RustCoreBridge.invokeAsync<string>('derive_master_key', {
+      'password': password,
+      'saltB64': saltB64,
+      'kdf': kdf,
+    });
+  }
+
   static encryptVault(plaintext: string, keyB64: string): string {
     return RustCoreBridge.invoke<string>('encrypt_vault', {
       'plaintext': plaintext,
@@ -152,8 +164,23 @@ export class RustCoreBridge {
     });
   }
 
+  static async exportKdbxAsync(path: string, itemsJson: string, password: string): Promise<void> {
+    await RustCoreBridge.invokeAsync<null>('export_kdbx', {
+      'path': path,
+      'itemsJson': itemsJson,
+      'password': password,
+    });
+  }
+
   static importKdbx(path: string, password: string): string {
     return RustCoreBridge.invoke<string>('import_kdbx', {
+      'path': path,
+      'password': password,
+    });
+  }
+
+  static async importKdbxAsync(path: string, password: string): Promise<string> {
+    return RustCoreBridge.invokeAsync<string>('import_kdbx', {
       'path': path,
       'password': password,
     });

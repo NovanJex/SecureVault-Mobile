@@ -54,6 +54,13 @@ const EN_PAIRS: Array<[string, string]> = [
   ['手势验证通过', 'Pattern verified'],
   ['手势图案错误', 'Incorrect pattern'],
   ['验证身份以解锁锁匣', 'Verify identity to unlock SecureVault'],
+  ['请先使用主密码解锁一次以激活快捷解锁', 'Please unlock with your master password once to enable quick unlock'],
+  ['快捷解锁密钥已失效，请使用主密码解锁', 'Quick unlock key expired. Please unlock with your master password'],
+  ['设置本机主密码（至少 8 位）', 'Set Local Master Password (min 8 chars)'],
+  ['首次导入需要设置本机主密码以加密保存凭证', 'Set a local master password to encrypt imported credentials'],
+  ['导出失败', 'Export failed'],
+  ['写入导出文件失败', 'Failed to write export file'],
+  ['处理中...', 'Processing...'],
 
   // Tabs & Navigation
   ['保险箱', 'Vault'],

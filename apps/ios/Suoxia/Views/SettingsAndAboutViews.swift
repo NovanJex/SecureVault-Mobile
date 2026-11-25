@@ -1,27 +1,52 @@
+import LocalAuthentication
 import SwiftUI
 import UniformTypeIdentifiers
+
+private enum ActivePrefSheet: Identifiable {
+    case changePwd, gestureSetup, verifyBio(String), webdav, importFlow, kdbxExportPwd, about
+
+    var id: String {
+        switch self {
+        case .changePwd: return "changePwd"
+        case .gestureSetup: return "gestureSetup"
+        case .verifyBio(let kind): return "verifyBio_\(kind)"
+        case .webdav: return "webdav"
+        case .importFlow: return "importFlow"
+        case .kdbxExportPwd: return "kdbxExportPwd"
+        case .about: return "about"
+        }
+    }
+}
+
+private enum ActivePrefDialog {
+    case autoLock, export
+}
 
 struct PreferencesView: View {
     @ObservedObject var store: VaultStore
 
-    @State private var showChangePwd = false
-    @State private var showGestureSetup = false
-    @State private var showAutoLockDialog = false
-    @State private var showWebDav = false
-    @State private var showImport = false
-    @State private var showExportDialog = false
-    @State private var showAbout = false
-
-    // Biometric verification sheet
-    @State private var pendingBioKind: String? = nil // "face" | "finger"
+    @State private var activeSheet: ActivePrefSheet? = nil
+    @State private var activeDialog: ActivePrefDialog? = nil
 
     // Export state
-    @State private var showKdbxPwdAlert = false
     @State private var kdbxExportPassword = ""
     @State private var exportDocument: ExportFileDocument? = nil
     @State private var exportFileName: String = ""
     @State private var exportContentType: UTType = .json
+    @State private var pendingFileExport = false
     @State private var showFileExporter = false
+
+    private var deviceBiometryType: LABiometryType {
+        KeychainAndBiometrics.biometryType
+    }
+
+    private var dialogTitle: String {
+        switch activeDialog {
+        case .autoLock: return t("自动锁定")
+        case .export: return t("导出加密备份")
+        case .none: return ""
+        }
+    }
 
     private var webdavSubtitle: String {
         let syncPart: String
@@ -50,7 +75,7 @@ struct PreferencesView: View {
 
                     VStack(spacing: 0) {
                         navRow(title: t("修改主密码")) {
-                            showChangePwd = true
+                            activeSheet = .changePwd
                         }
 
                         InsetDivider(isDark: store.isDark)
@@ -68,43 +93,45 @@ struct PreferencesView: View {
                         )
 
                         if store.requireUnlock {
-                            InsetDivider(isDark: store.isDark)
-                            toggleRow(
-                                title: t("面容识别"),
-                                subtitle: t("设备支持时优先使用面容解锁"),
-                                isOn: Binding(
-                                    get: { store.bioFaceOn },
-                                    set: { newVal in
-                                        if newVal {
-                                            pendingBioKind = "face"
-                                        } else {
-                                            store.bioFaceOn = false
-                                            store.saveMeta()
+                            if deviceBiometryType == .faceID {
+                                InsetDivider(isDark: store.isDark)
+                                toggleRow(
+                                    title: t("面容识别"),
+                                    subtitle: t("设备支持时优先使用面容解锁"),
+                                    isOn: Binding(
+                                        get: { store.bioFaceOn },
+                                        set: { newVal in
+                                            if newVal {
+                                                activeSheet = .verifyBio("face")
+                                            } else {
+                                                store.bioFaceOn = false
+                                                store.saveMeta()
+                                            }
                                         }
-                                    }
+                                    )
                                 )
-                            )
-
-                            InsetDivider(isDark: store.isDark)
-                            toggleRow(
-                                title: t("指纹识别"),
-                                subtitle: t("面容不可用或失败时快速切换指纹"),
-                                isOn: Binding(
-                                    get: { store.bioFingerOn },
-                                    set: { newVal in
-                                        if newVal {
-                                            pendingBioKind = "finger"
-                                        } else {
-                                            store.bioFingerOn = false
-                                            store.saveMeta()
+                            } else if deviceBiometryType == .touchID {
+                                InsetDivider(isDark: store.isDark)
+                                toggleRow(
+                                    title: t("指纹识别"),
+                                    subtitle: t("面容不可用或失败时快速切换指纹"),
+                                    isOn: Binding(
+                                        get: { store.bioFingerOn },
+                                        set: { newVal in
+                                            if newVal {
+                                                activeSheet = .verifyBio("finger")
+                                            } else {
+                                                store.bioFingerOn = false
+                                                store.saveMeta()
+                                            }
                                         }
-                                    }
+                                    )
                                 )
-                            )
+                            }
 
                             InsetDivider(isDark: store.isDark)
                             Button {
-                                showGestureSetup = true
+                                activeSheet = .gestureSetup
                             } label: {
                                 HStack(spacing: 12) {
                                     VStack(alignment: .leading, spacing: 2) {
@@ -133,7 +160,7 @@ struct PreferencesView: View {
 
                             InsetDivider(isDark: store.isDark)
                             navRow(title: t("自动锁定"), trailingText: store.autoLock.label) {
-                                showAutoLockDialog = true
+                                activeDialog = .autoLock
                             }
                         }
 
@@ -141,7 +168,7 @@ struct PreferencesView: View {
 
                         toggleRow(
                             title: t("防截屏与后台隐私保护"),
-                            subtitle: t("禁止截屏录屏，切出应用时自动保护"),
+                            subtitle: t("切出应用或进入多任务时自动模糊遮挡"),
                             isOn: Binding(
                                 get: { store.privacyMask },
                                 set: { val in
@@ -165,7 +192,7 @@ struct PreferencesView: View {
 
                     VStack(spacing: 0) {
                         Button {
-                            showWebDav = true
+                            activeSheet = .webdav
                         } label: {
                             HStack(spacing: 10) {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -207,13 +234,13 @@ struct PreferencesView: View {
                         InsetDivider(isDark: store.isDark)
 
                         navRow(title: t("导入凭证"), trailingText: "JSON / KDBX / CSV") {
-                            showImport = true
+                            activeSheet = .importFlow
                         }
 
                         InsetDivider(isDark: store.isDark)
 
                         navRow(title: t("导出加密备份")) {
-                            showExportDialog = true
+                            activeDialog = .export
                         }
                     }
                     .background(AppTheme.cardBackground(store.isDark))
@@ -248,7 +275,7 @@ struct PreferencesView: View {
                         InsetDivider(isDark: store.isDark)
 
                         navRow(title: t("关于锁匣"), trailingText: "v1.0.0") {
-                            showAbout = true
+                            activeSheet = .about
                         }
                     }
                     .background(AppTheme.cardBackground(store.isDark))
@@ -260,84 +287,99 @@ struct PreferencesView: View {
             .padding(.bottom, 24)
         }
         .background(AppTheme.pageBackground(store.isDark).ignoresSafeArea())
-        .sheet(isPresented: $showChangePwd) {
-            ChangeMasterPasswordSheet(store: store)
-                .svSheetPresentation(.large)
-        }
-        .sheet(isPresented: $showGestureSetup) {
-            GestureSetupSheet(store: store)
-                .svSheetPresentation(.large)
-        }
-        .sheet(isPresented: Binding(
-            get: { pendingBioKind != nil },
-            set: { if !$0 { pendingBioKind = nil } }
-        )) {
-            VerifyMasterPasswordSheet(store: store) {
-                if pendingBioKind == "face" {
-                    store.bioFaceOn = true
-                } else if pendingBioKind == "finger" {
-                    store.bioFingerOn = true
+        .confirmationDialog(
+            dialogTitle,
+            isPresented: Binding(
+                get: { activeDialog != nil },
+                set: { if !$0 { activeDialog = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if activeDialog == .autoLock {
+                ForEach(AutoLockOption.allCases) { opt in
+                    Button(opt.label) {
+                        store.autoLock = opt
+                        store.saveMeta()
+                        store.showToast(AppI18n.isChinese ? "自动锁定已设为：\(opt.label)" : "Auto-lock: \(opt.label)")
+                    }
                 }
-                store.saveMeta()
-                pendingBioKind = nil
+            } else if activeDialog == .export {
+                Button(t("导出为 锁匣加密备份 (.json)")) {
+                    do {
+                        let data = try store.buildEncryptedJsonExport()
+                        exportDocument = ExportFileDocument(data: data)
+                        exportFileName = "SecureVault_Backup_\(VaultHelpers.todayDateString()).json"
+                        exportContentType = .json
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            showFileExporter = true
+                        }
+                    } catch {
+                        store.showToast(error.localizedDescription, warn: true)
+                    }
+                }
+                Button(t("导出为 KeePass (.kdbx)")) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        kdbxExportPassword = ""
+                        activeSheet = .kdbxExportPwd
+                    }
+                }
             }
-            .svSheetPresentation(.compact(260))
+            Button(t("取消"), role: .cancel) {}
         }
-        .confirmationDialog(t("自动锁定"), isPresented: $showAutoLockDialog, titleVisibility: .visible) {
-            ForEach(AutoLockOption.allCases) { opt in
-                Button(opt.label) {
-                    store.autoLock = opt
+        .sheet(item: $activeSheet, onDismiss: {
+            if pendingFileExport {
+                pendingFileExport = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    showFileExporter = true
+                }
+            }
+        }) { sheet in
+            switch sheet {
+            case .changePwd:
+                ChangeMasterPasswordSheet(store: store)
+                    .svSheetPresentation(.large)
+            case .gestureSetup:
+                GestureSetupSheet(store: store)
+                    .svSheetPresentation(.large)
+            case .verifyBio(let kind):
+                VerifyMasterPasswordSheet(store: store) {
+                    if kind == "face" {
+                        store.bioFaceOn = true
+                    } else if kind == "finger" {
+                        store.bioFingerOn = true
+                    }
                     store.saveMeta()
-                    store.showToast(AppI18n.isChinese ? "自动锁定已设为：\(opt.label)" : "Auto-lock: \(opt.label)")
                 }
-            }
-            Button(t("取消"), role: .cancel) {}
-        }
-        .sheet(isPresented: $showWebDav) {
-            WebDavSheet(store: store, isOnboardingRestore: false)
-                .svSheetPresentation(.large)
-        }
-        .sheet(isPresented: $showImport) {
-            ImportFlowSheet(store: store)
-                .svSheetPresentation(.large)
-        }
-        .confirmationDialog(t("导出加密备份"), isPresented: $showExportDialog, titleVisibility: .visible) {
-            Button(t("导出为 锁匣加密备份 (.json)")) {
-                do {
-                    let data = try store.buildEncryptedJsonExport()
-                    exportDocument = ExportFileDocument(data: data)
-                    exportFileName = "SecureVault_Backup_\(VaultHelpers.todayDateString()).json"
-                    exportContentType = .json
-                    showFileExporter = true
-                } catch {
-                    store.showToast(error.localizedDescription, warn: true)
+                .svSheetPresentation(.compact(260))
+            case .webdav:
+                WebDavSheet(store: store, isOnboardingRestore: false)
+                    .svSheetPresentation(.large)
+            case .importFlow:
+                ImportFlowSheet(store: store)
+                    .svSheetPresentation(.large)
+            case .kdbxExportPwd:
+                KdbxExportPasswordSheet(store: store, password: $kdbxExportPassword) { pwd in
+                    guard !pwd.isEmpty else {
+                        store.showToast(t("请输入导出密码"), warn: true)
+                        return false
+                    }
+                    do {
+                        let data = try await store.buildKdbxExport(password: pwd)
+                        exportDocument = ExportFileDocument(data: data)
+                        exportFileName = "SecureVault_\(VaultHelpers.todayDateString()).kdbx"
+                        exportContentType = .data
+                        pendingFileExport = true
+                        return true
+                    } catch {
+                        store.showToast(error.localizedDescription, warn: true)
+                        return false
+                    }
                 }
+                .svSheetPresentation(.compact(270))
+            case .about:
+                AboutSheet(store: store)
+                    .svSheetPresentation(.large)
             }
-            Button(t("导出为 KeePass (.kdbx)")) {
-                kdbxExportPassword = ""
-                showKdbxPwdAlert = true
-            }
-            Button(t("取消"), role: .cancel) {}
-        }
-        .sheet(isPresented: $showKdbxPwdAlert) {
-            KdbxExportPasswordSheet(isDark: store.isDark, password: $kdbxExportPassword) { pwd in
-                guard !pwd.isEmpty else {
-                    store.showToast(t("请输入导出密码"), warn: true)
-                    return false
-                }
-                do {
-                    let data = try store.buildKdbxExport(password: pwd)
-                    exportDocument = ExportFileDocument(data: data)
-                    exportFileName = "SecureVault_\(VaultHelpers.todayDateString()).kdbx"
-                    exportContentType = .data
-                    showFileExporter = true
-                    return true
-                } catch {
-                    store.showToast(error.localizedDescription, warn: true)
-                    return false
-                }
-            }
-            .svSheetPresentation(.compact(270))
         }
         .fileExporter(
             isPresented: $showFileExporter,
@@ -352,10 +394,6 @@ struct PreferencesView: View {
             case .failure(let err):
                 store.showToast(err.localizedDescription, warn: true)
             }
-        }
-        .sheet(isPresented: $showAbout) {
-            AboutSheet(store: store)
-                .svSheetPresentation(.large)
         }
     }
 
@@ -481,24 +519,35 @@ struct ChangeMasterPasswordSheet: View {
                             store.showToast(t("两次密码输入不一致"), warn: true)
                             return
                         }
-                        if store.changeMasterPassword(current: currentPwd, newPassword: newPwd) {
-                            dismiss()
+                        let cur = currentPwd
+                        let next = newPwd
+                        Task {
+                            if await store.changeMasterPassword(current: cur, newPassword: next) {
+                                dismiss()
+                            }
                         }
                     } label: {
-                        Text(t("确认修改"))
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 46)
-                            .background(AppTheme.brand)
-                            .cornerRadius(16)
+                        HStack(spacing: 8) {
+                            if store.isBusy {
+                                ProgressView().tint(.white)
+                            }
+                            Text(t("确认修改"))
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                        .background(AppTheme.brand)
+                        .cornerRadius(16)
                     }
+                    .disabled(store.isBusy)
                     .padding(.top, 4)
                 }
                 .padding(16)
             }
         }
         .background(AppTheme.pageBackground(store.isDark).ignoresSafeArea())
+        .svToastOverlay(store: store)
     }
 }
 
@@ -546,6 +595,7 @@ struct AboutSheet: View {
             }
         }
         .background(AppTheme.pageBackground(store.isDark).ignoresSafeArea())
+        .svToastOverlay(store: store)
         .alert(
             externalLinkTarget.map { AppI18n.isChinese ? "将在浏览器中打开\($0.title)" : "Open \($0.title) in Browser" } ?? "",
             isPresented: Binding(
@@ -937,12 +987,10 @@ struct AboutSheet: View {
 }
 
 private struct KdbxExportPasswordSheet: View {
+    @ObservedObject var store: VaultStore
     @Environment(\.dismiss) private var dismiss
-    let isDark: Bool
     @Binding var password: String
-    let onConfirm: (String) -> Bool
-
-    @State private var showPwd = false
+    let onConfirm: (String) async -> Bool
 
     var body: some View {
         VStack(spacing: 14) {
@@ -960,7 +1008,7 @@ private struct KdbxExportPasswordSheet: View {
                 label: t("导出密码"),
                 placeholder: t("输入用于保护 .kdbx 文件的密码"),
                 text: $password,
-                isDark: isDark,
+                isDark: store.isDark,
                 isSecure: true,
                 showEyeToggle: true
             )
@@ -975,30 +1023,41 @@ private struct KdbxExportPasswordSheet: View {
                         .foregroundColor(.primary)
                         .frame(maxWidth: .infinity)
                         .frame(height: 44)
-                        .background(AppTheme.subtleBackground(isDark))
+                        .background(AppTheme.subtleBackground(store.isDark))
                         .cornerRadius(12)
                 }
                 .buttonStyle(.plain)
+                .disabled(store.isBusy)
 
                 Button {
-                    if onConfirm(password) {
-                        dismiss()
+                    let pwd = password
+                    Task {
+                        if await onConfirm(pwd) {
+                            dismiss()
+                        }
                     }
                 } label: {
-                    Text(t("确认导出"))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 44)
-                        .background(AppTheme.brand)
-                        .cornerRadius(12)
+                    HStack(spacing: 6) {
+                        if store.isBusy {
+                            ProgressView().tint(.white)
+                        }
+                        Text(t("确认导出"))
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .background(AppTheme.brand)
+                    .cornerRadius(12)
                 }
                 .buttonStyle(.plain)
+                .disabled(store.isBusy)
             }
             .padding(.horizontal, 16)
 
             Spacer(minLength: 8)
         }
-        .background(AppTheme.pageBackground(isDark).ignoresSafeArea())
+        .background(AppTheme.pageBackground(store.isDark).ignoresSafeArea())
+        .svToastOverlay(store: store)
     }
 }

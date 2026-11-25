@@ -847,51 +847,78 @@ export struct EditCredentialSheet {
   }
 
   @Builder
-  QuickGenActionSheet() {
-    Column({ space: 14 }) {
-      Row() {
-        Text(t('快速生成密码'))
-          .fontSize(14)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.p().fgMain)
-        Text(t('换一个'))
-          .fontSize(12)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(this.p().brand)
-          .onClick(() => {
-            this.regenQuickPwd();
-          })
-      }.width('100%').justifyContent(FlexAlign.SpaceBetween)
+  QuickGenInlineModal() {
+    Stack({ alignContent: Alignment.Center }) {
+      Column({ space: 14 }) {
+        Row() {
+          Text(t('快速生成密码'))
+            .fontSize(15)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.p().fgMain)
+          Text(t('换一个'))
+            .fontSize(12)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.p().brand)
+            .onClick(() => {
+              this.regenQuickPwd();
+            })
+        }.width('100%').justifyContent(FlexAlign.SpaceBetween)
 
-      Row() {
-        Text() {
-          ForEach(colorizePasswordSegments(this.quickGenPwd), (seg: ColoredCharSegment) => {
-            Span(seg.text).fontColor(seg.color).fontSize(15).fontFamily('monospace')
-          })
+        Row() {
+          Text() {
+            ForEach(colorizePasswordSegments(this.quickGenPwd), (seg: ColoredCharSegment) => {
+              Span(seg.text).fontColor(seg.color).fontSize(15).fontFamily('monospace')
+            })
+          }
         }
-      }
-      .width('100%')
-      .padding(16)
-      .borderRadius(16)
-      .backgroundColor('#0F172A')
-
-      Button(t('使用此密码'))
         .width('100%')
-        .height(44)
+        .padding(16)
         .borderRadius(14)
-        .fontSize(14)
-        .fontWeight(FontWeight.Medium)
-        .backgroundColor(this.p().brand)
-        .fontColor('#FFFFFF')
-        .onClick(() => {
-          this.efPass = this.quickGenPwd;
-          this.showQuickGen = false;
-          vaultStore.showToast(t('已填入生成的随机密码'));
-        })
+        .backgroundColor('#0F172A')
+
+        Row({ space: 10 }) {
+          Button(t('取消'))
+            .layoutWeight(1)
+            .height(42)
+            .borderRadius(12)
+            .fontSize(13)
+            .backgroundColor(this.p().bgSub)
+            .fontColor(this.p().fgMain)
+            .border({ width: 1, color: this.p().border })
+            .onClick(() => {
+              this.showQuickGen = false;
+            })
+          Button(t('使用此密码'))
+            .layoutWeight(1)
+            .height(42)
+            .borderRadius(12)
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .backgroundColor(this.p().brand)
+            .fontColor('#FFFFFF')
+            .onClick(() => {
+              this.efPass = this.quickGenPwd;
+              this.showQuickGen = false;
+              vaultStore.showToast(t('已填入生成的随机密码'));
+            })
+        }.width('100%')
+      }
+      .width('88%')
+      .constraintSize({ maxWidth: 340 })
+      .padding(18)
+      .borderRadius(20)
+      .backgroundColor(this.p().bgCard)
+      .border({ width: 1, color: this.p().border })
+      .onClick(() => {
+        // Consume tap inside modal card
+      })
     }
-    .padding(16)
     .width('100%')
-    .backgroundColor(this.p().bgPage)
+    .height('100%')
+    .backgroundColor('#66000000')
+    .onClick(() => {
+      this.showQuickGen = false;
+    })
   }
 
   @Builder
@@ -936,8 +963,9 @@ export struct EditCredentialSheet {
   }
 
   build() {
-    Column() {
-      // Sheet Header
+    Stack() {
+      Column() {
+        // Sheet Header
       Row() {
         Text(t('取消'))
           .fontSize(14)
@@ -1253,11 +1281,16 @@ export struct EditCredentialSheet {
       .layoutWeight(1)
     }
     .width('100%')
+    .height('100%')
     .backgroundColor(this.p().bgPage)
-    .bindSheet($$this.showQuickGen, this.QuickGenActionSheet(), {
-      detents: [SheetSize.FIT_CONTENT],
-      dragBar: true,
-    })
+
+      if (this.showQuickGen) {
+        this.QuickGenInlineModal()
+      }
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor(this.p().bgPage)
   }
 
   @Builder

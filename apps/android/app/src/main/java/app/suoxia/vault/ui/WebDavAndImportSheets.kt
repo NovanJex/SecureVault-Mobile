@@ -1,5 +1,6 @@
 package app.suoxia.vault.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -449,48 +450,51 @@ fun RemoteSaltPasswordDialog(
 ) {
     var pwd by remember { mutableStateOf("") }
     Dialog(onDismissRequest = { vm.dismissRemoteSaltDialog() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(
-            modifier = Modifier.widthIn(max = 310.dp).fillMaxWidth(0.86f),
-            shape = RoundedCornerShape(24.dp),
-            color = p.card,
-            border = BorderStroke(1.dp, p.border),
-            shadowElevation = 16.dp
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Surface(
+                modifier = Modifier.widthIn(max = 310.dp).fillMaxWidth(0.86f),
+                shape = RoundedCornerShape(24.dp),
+                color = p.card,
+                border = BorderStroke(1.dp, p.border),
+                shadowElevation = 16.dp
             ) {
-                Text(t("输入云端保险箱主密码"), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = p.fg, textAlign = TextAlign.Center)
-                Text(
-                    t("云端备份使用了不同的加密盐值，请输入对应的主密码以解密并同步。"),
-                    fontSize = 12.sp,
-                    color = p.fg.copy(alpha = 0.65f),
-                    textAlign = TextAlign.Center
-                )
-                SvInputField(p, pwd, { pwd = it }, t("输入主密码"), isPassword = true)
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = p.sub,
-                        border = BorderStroke(1.dp, p.border),
-                        modifier = Modifier.weight(1f).height(40.dp).clickable { vm.dismissRemoteSaltDialog() }
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(t("取消"), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = p.fg)
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(t("输入云端保险箱主密码"), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = p.fg, textAlign = TextAlign.Center)
+                    Text(
+                        t("云端备份使用了不同的加密盐值，请输入对应的主密码以解密并同步。"),
+                        fontSize = 12.sp,
+                        color = p.fg.copy(alpha = 0.65f),
+                        textAlign = TextAlign.Center
+                    )
+                    SvInputField(p, pwd, { pwd = it }, t("输入主密码"), isPassword = true)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = p.sub,
+                            border = BorderStroke(1.dp, p.border),
+                            modifier = Modifier.weight(1f).height(40.dp).clickable { vm.dismissRemoteSaltDialog() }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(t("取消"), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = p.fg)
+                            }
                         }
-                    }
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = SvIndigo,
-                        modifier = Modifier.weight(1f).height(40.dp).clickable { vm.submitRemoteSaltPassword(pwd) }
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(t("确认"), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = SvIndigo,
+                            modifier = Modifier.weight(1f).height(40.dp).clickable { vm.submitRemoteSaltPassword(pwd) }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(t("确认"), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                            }
                         }
                     }
                 }
             }
+            SvToastOverlay(bottomPadding = 24.dp)
         }
     }
 }
@@ -534,6 +538,10 @@ fun ImportFlowSheet(
             if (step == "pick") onDismiss() else onResetToPick()
         }
     ) {
+        BackHandler(enabled = step != "pick") {
+            onResetToPick()
+        }
+
         when (step) {
             "pick" -> {
                 Column(
@@ -604,6 +612,14 @@ fun ImportFlowSheet(
                 val newCount = data.items.size - dupCount
                 val finalCount = if (strategy == ImportStrategy.SKIP_DUPLICATES) newCount else data.items.size
 
+                val needsOnboardingMasterPwd = !vm.hasVault && (data.sourcePassword == null || data.sourcePassword.length < 8)
+                var onboardingPwd1 by remember(data) { mutableStateOf("") }
+                var onboardingPwd2 by remember(data) { mutableStateOf("") }
+                val onboardingMismatch = onboardingPwd2.isNotEmpty() && onboardingPwd1 != onboardingPwd2
+                val onboardingMatched = onboardingPwd2.isNotEmpty() && onboardingPwd1 == onboardingPwd2
+                val onboardingPwdValid = !needsOnboardingMasterPwd || (onboardingPwd1.length >= 8 && onboardingPwd1 == onboardingPwd2)
+                val canSubmit = !vm.isBusy && onboardingPwdValid
+
                 Column(modifier = Modifier.fillMaxWidth().weight(1f, fill = false)) {
                     Column(
                         modifier = Modifier.fillMaxWidth().weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(16.dp),
@@ -620,6 +636,57 @@ fun ImportFlowSheet(
                                     StatBox(p, data.items.size.toString(), t("识别条数"), p.fg, Modifier.weight(1f))
                                     StatBox(p, newCount.toString(), t("新增条目"), SvEmerald, Modifier.weight(1f))
                                     StatBox(p, dupCount.toString(), t("重复条目"), if (dupCount > 0) SvAmber else p.fg.copy(alpha = 0.6f), Modifier.weight(1f))
+                                }
+                            }
+                        }
+
+                        // Onboarding Master Password Section (required when importing plaintext / short-password backup without an existing vault)
+                        if (needsOnboardingMasterPwd) {
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = p.card,
+                                border = BorderStroke(1.dp, p.border),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                        Text(t("设置本机主密码"), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = p.fg)
+                                        Text(
+                                            t("该备份未包含主密码，请为本机保险箱设置主密码（至少 8 位）。"),
+                                            fontSize = 11.sp,
+                                            color = p.fg.copy(alpha = 0.6f),
+                                            lineHeight = 16.sp
+                                        )
+                                    }
+                                    SvInputField(
+                                        p = p,
+                                        value = onboardingPwd1,
+                                        onValueChange = { onboardingPwd1 = it },
+                                        placeholder = t("输入高强度主密码"),
+                                        label = t("主密码（至少 8 位）"),
+                                        isPassword = true
+                                    )
+                                    SvInputField(
+                                        p = p,
+                                        value = onboardingPwd2,
+                                        onValueChange = { onboardingPwd2 = it },
+                                        placeholder = t("再次输入以确认"),
+                                        label = t("确认主密码"),
+                                        labelEnd = {
+                                            val txt = when {
+                                                onboardingMismatch -> t("两次输入不一致")
+                                                onboardingMatched -> t("✓ 一致")
+                                                else -> ""
+                                            }
+                                            val col = if (onboardingMismatch) SvRose else SvEmerald
+                                            Text(text = txt, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = col)
+                                        },
+                                        isPassword = true,
+                                        borderColorOverride = if (onboardingMismatch) SvRose.copy(alpha = 0.7f) else null
+                                    )
                                 }
                             }
                         }
@@ -701,24 +768,30 @@ fun ImportFlowSheet(
                     // Sticky footer CTA
                     HorizontalDivider(thickness = 1.dp, color = p.hairline)
                     Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        val baseBtnColor = if (strategy == ImportStrategy.OVERWRITE) SvRose else SvIndigo
                         Surface(
                             shape = RoundedCornerShape(16.dp),
-                            color = if (strategy == ImportStrategy.OVERWRITE) SvRose else SvIndigo,
+                            color = if (canSubmit) baseBtnColor else baseBtnColor.copy(alpha = 0.45f),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(48.dp)
-                                .clickable {
+                                .clickable(enabled = canSubmit) {
                                     if (strategy == ImportStrategy.OVERWRITE) {
                                         showOverwriteConfirm = true
                                     } else {
-                                        vm.executeImport(data, strategy)
-                                        onDismiss()
+                                        vm.executeImport(
+                                            preview = data,
+                                            strategy = strategy,
+                                            onboardingMasterPwd = if (needsOnboardingMasterPwd) onboardingPwd1 else null
+                                        ) { ok ->
+                                            if (ok) onDismiss()
+                                        }
                                     }
                                 }
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Text(
-                                    text = if (strategy == ImportStrategy.OVERWRITE) "覆盖并导入（$finalCount 条）" else "确认导入（$finalCount 条）",
+                                    text = if (vm.isBusy) "..." else if (strategy == ImportStrategy.OVERWRITE) "覆盖并导入（$finalCount 条）" else "确认导入（$finalCount 条）",
                                     color = Color.White,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.SemiBold
@@ -738,8 +811,13 @@ fun ImportFlowSheet(
                         onDismiss = { showOverwriteConfirm = false },
                         onConfirm = {
                             showOverwriteConfirm = false
-                            vm.executeImport(data, ImportStrategy.OVERWRITE)
-                            onDismiss()
+                            vm.executeImport(
+                                preview = data,
+                                strategy = ImportStrategy.OVERWRITE,
+                                onboardingMasterPwd = if (needsOnboardingMasterPwd) onboardingPwd1 else null
+                            ) { ok ->
+                                if (ok) onDismiss()
+                            }
                         }
                     )
                 }
@@ -857,49 +935,53 @@ fun ExportFormatSheet(
 fun KdbxExportPasswordDialog(
     p: SvPalette,
     onDismiss: () -> Unit,
+    onEmptyPassword: () -> Unit = {},
     onConfirm: (String) -> Unit
 ) {
     var pwd by remember { mutableStateOf("") }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(
-            modifier = Modifier.widthIn(max = 310.dp).fillMaxWidth(0.86f),
-            shape = RoundedCornerShape(24.dp),
-            color = p.card,
-            border = BorderStroke(1.dp, p.border),
-            shadowElevation = 16.dp
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Surface(
+                modifier = Modifier.widthIn(max = 310.dp).fillMaxWidth(0.86f),
+                shape = RoundedCornerShape(24.dp),
+                color = p.card,
+                border = BorderStroke(1.dp, p.border),
+                shadowElevation = 16.dp
             ) {
-                Text(t("设置 KeePass 导出密码"), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = p.fg, textAlign = TextAlign.Center)
-                Text(t("输入用于加密 .kdbx 文件的密码"), fontSize = 12.sp, color = p.fg.copy(alpha = 0.65f), textAlign = TextAlign.Center)
-                SvInputField(p, pwd, { pwd = it }, t("输入主密码"), isPassword = true)
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = p.sub,
-                        border = BorderStroke(1.dp, p.border),
-                        modifier = Modifier.weight(1f).height(40.dp).clickable { onDismiss() }
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(t("取消"), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = p.fg)
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(t("设置 KeePass 导出密码"), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = p.fg, textAlign = TextAlign.Center)
+                    Text(t("输入用于加密 .kdbx 文件的密码"), fontSize = 12.sp, color = p.fg.copy(alpha = 0.65f), textAlign = TextAlign.Center)
+                    SvInputField(p, pwd, { pwd = it }, t("输入主密码"), isPassword = true)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = p.sub,
+                            border = BorderStroke(1.dp, p.border),
+                            modifier = Modifier.weight(1f).height(40.dp).clickable { onDismiss() }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(t("取消"), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = p.fg)
+                            }
                         }
-                    }
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = SvIndigo,
-                        modifier = Modifier.weight(1f).height(40.dp).clickable {
-                            if (pwd.isNotEmpty()) onConfirm(pwd)
-                        }
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(t("确认"), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = SvIndigo,
+                            modifier = Modifier.weight(1f).height(40.dp).clickable {
+                                if (pwd.isNotEmpty()) onConfirm(pwd) else onEmptyPassword()
+                            }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(t("确认"), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                            }
                         }
                     }
                 }
             }
+            SvToastOverlay(bottomPadding = 24.dp)
         }
     }
 }

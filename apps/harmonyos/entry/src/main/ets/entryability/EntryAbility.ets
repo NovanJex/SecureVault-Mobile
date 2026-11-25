@@ -20,6 +20,7 @@ export default class EntryAbility extends UIAbility {
       windowStage.getMainWindow().then((win) => {
         SecurityService.attachWindow(win);
         SecurityService.setPrivacyMode(vaultStore.privacyMask);
+        SecurityService.applyImmersiveSystemBars(vaultStore.theme === 'dark');
       });
     });
   }

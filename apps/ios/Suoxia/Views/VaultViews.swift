@@ -1,11 +1,21 @@
 import SwiftUI
 
+private enum ActiveVaultSheet: Identifiable {
+    case folders, trash, newCred
+
+    var id: Int {
+        switch self {
+        case .folders: return 0
+        case .trash: return 1
+        case .newCred: return 2
+        }
+    }
+}
+
 struct VaultListView: View {
     @ObservedObject var store: VaultStore
 
-    @State private var showFolderManager = false
-    @State private var showTrash = false
-    @State private var showNewSheet = false
+    @State private var activeSheet: ActiveVaultSheet? = nil
 
     private var filteredItems: [VaultItem] {
         let q = store.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -73,7 +83,7 @@ struct VaultListView: View {
                             Spacer()
                             HStack(spacing: 8) {
                                 Button {
-                                    showFolderManager = true
+                                    activeSheet = .folders
                                 } label: {
                                     Circle()
                                         .fill(AppTheme.cardBackground(store.isDark))
@@ -90,7 +100,7 @@ struct VaultListView: View {
                                 .accessibilityLabel(t("文件夹管理"))
 
                                 Button {
-                                    showTrash = true
+                                    activeSheet = .trash
                                 } label: {
                                     ZStack(alignment: .topTrailing) {
                                         Circle()
@@ -194,7 +204,7 @@ struct VaultListView: View {
 
                 // Floating Action Button (+)
                 Button {
-                    showNewSheet = true
+                    activeSheet = .newCred
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 20, weight: .semibold))
@@ -209,17 +219,18 @@ struct VaultListView: View {
                 .accessibilityLabel(t("新建凭证"))
             }
             .navigationBarHidden(true)
-            .sheet(isPresented: $showFolderManager) {
-                FolderManagerSheet(store: store)
-                    .svSheetPresentation(.mediumAndLarge)
-            }
-            .sheet(isPresented: $showTrash) {
-                TrashSheet(store: store)
-                    .svSheetPresentation(.mediumAndLarge)
-            }
-            .sheet(isPresented: $showNewSheet) {
-                CredentialEditSheet(store: store, editItem: nil)
-                    .svSheetPresentation(.large)
+            .sheet(item: $activeSheet) { sheet in
+                switch sheet {
+                case .folders:
+                    FolderManagerSheet(store: store)
+                        .svSheetPresentation(.mediumAndLarge)
+                case .trash:
+                    TrashSheet(store: store)
+                        .svSheetPresentation(.mediumAndLarge)
+                case .newCred:
+                    CredentialEditSheet(store: store, editItem: nil)
+                        .svSheetPresentation(.large)
+                }
             }
         }
     }
@@ -405,6 +416,7 @@ struct FolderManagerSheet: View {
             }
         }
         .background(AppTheme.pageBackground(store.isDark).ignoresSafeArea())
+        .svToastOverlay(store: store)
         .alert(
             folderToDelete.map { AppI18n.isChinese ? "删除文件夹「\($0)」？" : "Delete folder \"\($0)\"?" } ?? "",
             isPresented: Binding(
@@ -476,12 +488,34 @@ struct FolderManagerSheet: View {
 
 // MARK: - Trash Sheet
 
+private enum TrashAlert: Identifiable {
+    case empty
+    case purge(VaultItem)
+
+    var id: String {
+        switch self {
+        case .empty: return "empty"
+        case .purge(let item): return "purge_\(item.id)"
+        }
+    }
+}
+
 struct TrashSheet: View {
     @ObservedObject var store: VaultStore
     @Environment(\.dismiss) private var dismiss
 
-    @State private var confirmEmpty = false
-    @State private var purgeTarget: VaultItem? = nil
+    @State private var activeAlert: TrashAlert? = nil
+
+    private var alertTitle: String {
+        switch activeAlert {
+        case .empty:
+            return t("清空回收站？")
+        case .purge(let item):
+            return AppI18n.isChinese ? "彻底删除「\(item.title)」？" : "Delete \"\(item.title)\" forever?"
+        case .none:
+            return ""
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -493,7 +527,7 @@ struct TrashSheet: View {
             ) {
                 if !store.trashedItems.isEmpty {
                     Button {
-                        confirmEmpty = true
+                        activeAlert = .empty
                     } label: {
                         Text(t("清空"))
                             .font(.system(size: 14, weight: .medium))
@@ -535,7 +569,7 @@ struct TrashSheet: View {
                                     }
 
                                     Button {
-                                        purgeTarget = item
+                                        activeAlert = .purge(item)
                                     } label: {
                                         Text(t("删除"))
                                             .font(.system(size: 12, weight: .semibold))
@@ -561,30 +595,35 @@ struct TrashSheet: View {
             }
         }
         .background(AppTheme.pageBackground(store.isDark).ignoresSafeArea())
-        .alert(t("清空回收站？"), isPresented: $confirmEmpty) {
-            Button(t("取消"), role: .cancel) {}
-            Button(t("确认清空"), role: .destructive) {
-                store.emptyTrash()
-            }
-        } message: {
-            Text(t("回收站内所有凭证将被永久销毁且无法恢复。"))
-        }
+        .svToastOverlay(store: store)
         .alert(
-            purgeTarget.map { AppI18n.isChinese ? "彻底删除「\($0.title)」？" : "Delete \"\($0.title)\" forever?" } ?? "",
+            alertTitle,
             isPresented: Binding(
-                get: { purgeTarget != nil },
-                set: { if !$0 { purgeTarget = nil } }
-            )
-        ) {
-            Button(t("取消"), role: .cancel) { purgeTarget = nil }
-            Button(t("彻底删除"), role: .destructive) {
-                if let target = purgeTarget {
-                    store.purgeItem(id: target.id)
+                get: { activeAlert != nil },
+                set: { if !$0 { activeAlert = nil } }
+            ),
+            presenting: activeAlert
+        ) { alert in
+            Button(t("取消"), role: .cancel) { activeAlert = nil }
+            switch alert {
+            case .empty:
+                Button(t("确认清空"), role: .destructive) {
+                    store.emptyTrash()
+                    activeAlert = nil
                 }
-                purgeTarget = nil
+            case .purge(let target):
+                Button(t("彻底删除"), role: .destructive) {
+                    store.purgeItem(id: target.id)
+                    activeAlert = nil
+                }
             }
-        } message: {
-            Text(t("删除后将无法恢复，请确认不再需要此凭证。"))
+        } message: { alert in
+            switch alert {
+            case .empty:
+                Text(t("回收站内所有凭证将被永久销毁且无法恢复。"))
+            case .purge:
+                Text(t("删除后将无法恢复，请确认不再需要此凭证。"))
+            }
         }
     }
 }

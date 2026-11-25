@@ -167,6 +167,7 @@ struct AddTotpSheet: View {
     @State private var account = ""
     @State private var secret = ""
     @State private var showScanner = false
+    @State private var shouldDismissAfterScan = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -269,11 +270,17 @@ struct AddTotpSheet: View {
             }
         }
         .background(AppTheme.pageBackground(store.isDark).ignoresSafeArea())
-        .sheet(isPresented: $showScanner) {
+        .svToastOverlay(store: store)
+        .sheet(isPresented: $showScanner, onDismiss: {
+            if shouldDismissAfterScan {
+                shouldDismissAfterScan = false
+                dismiss()
+            }
+        }) {
             QrScannerModal(isDark: store.isDark) { uri in
                 if let parsed = try? SecureVaultCore.parseOtpauthUri(uri) {
                     store.addStandaloneTotp(issuer: parsed.issuer, account: parsed.account, secret: parsed.secret, fromScan: true)
-                    dismiss()
+                    shouldDismissAfterScan = true
                 } else {
                     store.showToast(t("二维码格式不支持"), warn: true)
                 }
@@ -348,7 +355,7 @@ struct GeneratorView: View {
 
                         HStack(spacing: 8) {
                             Button {
-                                regenerate()
+                                regenerate(recordHistory: true)
                             } label: {
                                 Text(t("换一个"))
                                     .font(.system(size: 12, weight: .medium))
@@ -360,6 +367,7 @@ struct GeneratorView: View {
                             }
                             Button {
                                 KeychainAndBiometrics.copySensitive(currentPwd)
+                                store.recordGeneratedPassword(currentPwd)
                                 store.showToast(t("已复制"))
                             } label: {
                                 Text(t("复制"))
@@ -393,9 +401,13 @@ struct GeneratorView: View {
                                     .font(.system(size: 14, weight: .bold, design: .monospaced))
                                     .foregroundColor(AppTheme.brand)
                             }
-                            Slider(value: $length, in: 8...48, step: 1)
+                            Slider(value: $length, in: 8...48, step: 1, onEditingChanged: { editing in
+                                if !editing {
+                                    store.recordGeneratedPassword(currentPwd)
+                                }
+                            })
                                 .tint(AppTheme.brand)
-                                .onChange(of: length) { _ in regenerate() }
+                                .onChange(of: length) { _ in regenerate(recordHistory: false) }
                         }
                         .padding(16)
 
@@ -414,9 +426,13 @@ struct GeneratorView: View {
                                     .font(.system(size: 14, weight: .bold, design: .monospaced))
                                     .foregroundColor(AppTheme.brand)
                             }
-                            Slider(value: $bipWords, in: 3...10, step: 1)
+                            Slider(value: $bipWords, in: 3...10, step: 1, onEditingChanged: { editing in
+                                if !editing {
+                                    store.recordGeneratedPassword(currentPwd)
+                                }
+                            })
                                 .tint(AppTheme.brand)
-                                .onChange(of: bipWords) { _ in regenerate() }
+                                .onChange(of: bipWords) { _ in regenerate(recordHistory: false) }
                         }
                         .padding(16)
 
@@ -501,7 +517,7 @@ struct GeneratorView: View {
         }
         .background(AppTheme.pageBackground(store.isDark).ignoresSafeArea())
         .onAppear {
-            if currentPwd.isEmpty { regenerate() }
+            if currentPwd.isEmpty { regenerate(recordHistory: true) }
         }
         .alert(t("清空最近生成记录？"), isPresented: $confirmClearHistory) {
             Button(t("取消"), role: .cancel) {}
@@ -561,7 +577,7 @@ struct GeneratorView: View {
         .buttonStyle(.plain)
     }
 
-    private func regenerate() {
+    private func regenerate(recordHistory: Bool = false) {
         if mode == "random" {
             currentPwd = (try? SecureVaultCore.generatePassword(
                 length: Int(length),
@@ -578,6 +594,8 @@ struct GeneratorView: View {
                 capitalize: bipCap
             )) ?? ""
         }
-        store.recordGeneratedPassword(currentPwd)
+        if recordHistory {
+            store.recordGeneratedPassword(currentPwd)
+        }
     }
 }

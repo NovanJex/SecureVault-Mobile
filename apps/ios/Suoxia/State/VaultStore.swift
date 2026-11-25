@@ -34,8 +34,12 @@ final class VaultStore: ObservableObject {
     @Published var webdavAutoSync: Bool = true
     @Published var webdavLastSync: String = ""
     @Published var webdavSyncing: Bool = false
+    @Published var isWebDavSheetOpen: Bool = false
     @Published var showWebdavConflictSheet: Bool = false
     @Published var showRemotePasswordPrompt: Bool = false
+
+    // MARK: - Busy State (Off-Main KDF / KDBX)
+    @Published var isBusy: Bool = false
 
     // MARK: - Generator History (max 6)
     @Published var genHistory: [String] = []
@@ -236,6 +240,11 @@ final class VaultStore: ObservableObject {
 
     func lockNow(showMessage: Bool = true) {
         debounceUploadTask?.cancel()
+        masterKeyB64 = ""
+        items = []
+        folders = []
+        standaloneTotps = []
+        rawPayloadExtras = [:]
         screen = .unlock
         if showMessage {
             showToast(t("锁匣已锁定"))
@@ -244,14 +253,27 @@ final class VaultStore: ObservableObject {
 
     // MARK: - Vault Creation & Unlock
 
-    func createFreshVault(password: String) -> Bool {
+    func createFreshVault(password: String) async -> Bool {
+        guard !isBusy else { return false }
         guard password.count >= 8 else {
             showToast(t("主密码至少 8 位"), warn: true)
             return false
         }
-        do {
-            saltB64 = try SecureVaultCore.generateSalt()
-            masterKeyB64 = try SecureVaultCore.deriveMasterKey(password: password, saltB64: saltB64, kdf: "argon2id")
+        isBusy = true
+        defer { isBusy = false }
+
+        let result = await Task.detached(priority: .userInitiated) { () -> Result<(salt: String, key: String), Error> in
+            Result {
+                let salt = try SecureVaultCore.generateSalt()
+                let key = try SecureVaultCore.deriveMasterKey(password: password, saltB64: salt, kdf: "argon2id")
+                return (salt: salt, key: key)
+            }
+        }.value
+
+        switch result {
+        case .success(let derived):
+            saltB64 = derived.salt
+            masterKeyB64 = derived.key
             items = []
             folders = []
             standaloneTotps = []
@@ -264,13 +286,13 @@ final class VaultStore: ObservableObject {
             activeTab = .vault
             showToast(t("保险箱已创建"))
             return true
-        } catch {
+        case .failure:
             showToast(t("创建失败"), warn: true)
             return false
         }
     }
 
-    private func splitVaultFileContent(_ raw: String) -> (salt: String?, cipher: String) {
+    nonisolated private static func splitVaultFileContent(_ raw: String) -> (salt: String?, cipher: String) {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if let idx = trimmed.firstIndex(of: ":") {
             let s = String(trimmed[..<idx])
@@ -282,7 +304,7 @@ final class VaultStore: ObservableObject {
         return (nil, trimmed)
     }
 
-    private func deriveAndDecrypt(password: String, salt: String, cipher: String) -> (key: String, plain: String)? {
+    nonisolated private static func deriveAndDecryptOffMain(password: String, salt: String, cipher: String) -> (key: String, plain: String)? {
         for kdf in ["argon2id", "pbkdf2"] {
             if let key = try? SecureVaultCore.deriveMasterKey(password: password, saltB64: salt, kdf: kdf),
                let plain = try? SecureVaultCore.decryptVault(ciphertextB64: cipher, keyB64: key) {
@@ -292,7 +314,8 @@ final class VaultStore: ObservableObject {
         return nil
     }
 
-    func unlockWithPassword(_ password: String) -> Bool {
+    func unlockWithPassword(_ password: String) async -> Bool {
+        guard !isBusy else { return false }
         guard !password.isEmpty else {
             showToast(t("主密码不正确"), warn: true)
             return false
@@ -301,14 +324,21 @@ final class VaultStore: ObservableObject {
             showToast(t("主密码不正确"), warn: true)
             return false
         }
-        let parsed = splitVaultFileContent(rawFile)
+        let parsed = Self.splitVaultFileContent(rawFile)
         let effectiveSalt = parsed.salt ?? saltB64
         guard !effectiveSalt.isEmpty else {
             showToast(t("主密码不正确"), warn: true)
             return false
         }
 
-        guard let result = deriveAndDecrypt(password: password, salt: effectiveSalt, cipher: parsed.cipher) else {
+        isBusy = true
+        let cipher = parsed.cipher
+        let result = await Task.detached(priority: .userInitiated) {
+            Self.deriveAndDecryptOffMain(password: password, salt: effectiveSalt, cipher: cipher)
+        }.value
+        isBusy = false
+
+        guard let result else {
             showToast(t("主密码不正确"), warn: true)
             return false
         }
@@ -364,42 +394,73 @@ final class VaultStore: ObservableObject {
         return true
     }
 
-    func verifyMasterPassword(_ password: String) -> Bool {
+    func verifyMasterPassword(_ password: String) async -> Bool {
+        guard !isBusy else { return false }
         guard !password.isEmpty, !saltB64.isEmpty else { return false }
-        for kdf in ["argon2id", "pbkdf2"] {
-            if let key = try? SecureVaultCore.deriveMasterKey(password: password, saltB64: saltB64, kdf: kdf),
-               key == masterKeyB64 {
-                return true
+        isBusy = true
+        defer { isBusy = false }
+
+        let currentSalt = saltB64
+        let currentKey = masterKeyB64
+        return await Task.detached(priority: .userInitiated) {
+            for kdf in ["argon2id", "pbkdf2"] {
+                if let key = try? SecureVaultCore.deriveMasterKey(password: password, saltB64: currentSalt, kdf: kdf),
+                   key == currentKey {
+                    return true
+                }
             }
-        }
-        return false
+            return false
+        }.value
     }
 
-    func changeMasterPassword(current: String, newPassword: String) -> Bool {
-        guard verifyMasterPassword(current) else {
-            showToast(t("当前主密码不正确"), warn: true)
-            return false
-        }
+    func changeMasterPassword(current: String, newPassword: String) async -> Bool {
+        guard !isBusy else { return false }
         guard newPassword.count >= 8 else {
             showToast(t("主密码至少 8 位"), warn: true)
             return false
         }
-        do {
-            // Preserve decrypted WebDAV password before rotating master key
-            var savedWdPass: String? = nil
-            if let cfg = try? SecureVaultCore.getWebdavConfig(dataDir: dataDir), !cfg.passwordEnc.isEmpty {
-                savedWdPass = try? SecureVaultCore.decryptVault(ciphertextB64: cfg.passwordEnc, keyB64: masterKeyB64)
+        isBusy = true
+        defer { isBusy = false }
+
+        let oldSalt = saltB64
+        let oldKey = masterKeyB64
+        let verified = await Task.detached(priority: .userInitiated) {
+            for kdf in ["argon2id", "pbkdf2"] {
+                if let key = try? SecureVaultCore.deriveMasterKey(password: current, saltB64: oldSalt, kdf: kdf),
+                   key == oldKey {
+                    return true
+                }
             }
+            return false
+        }.value
 
-            let newSalt = try SecureVaultCore.generateSalt()
-            let newKey = try SecureVaultCore.deriveMasterKey(password: newPassword, saltB64: newSalt, kdf: "argon2id")
+        guard verified else {
+            showToast(t("当前主密码不正确"), warn: true)
+            return false
+        }
 
-            saltB64 = newSalt
-            masterKeyB64 = newKey
+        // Preserve decrypted WebDAV password before rotating master key
+        var savedWdPass: String? = nil
+        if let cfg = try? SecureVaultCore.getWebdavConfig(dataDir: dataDir), !cfg.passwordEnc.isEmpty {
+            savedWdPass = try? SecureVaultCore.decryptVault(ciphertextB64: cfg.passwordEnc, keyB64: masterKeyB64)
+        }
+
+        let deriveResult = await Task.detached(priority: .userInitiated) { () -> Result<(salt: String, key: String), Error> in
+            Result {
+                let newSalt = try SecureVaultCore.generateSalt()
+                let newKey = try SecureVaultCore.deriveMasterKey(password: newPassword, saltB64: newSalt, kdf: "argon2id")
+                return (salt: newSalt, key: newKey)
+            }
+        }.value
+
+        switch deriveResult {
+        case .success(let derived):
+            saltB64 = derived.salt
+            masterKeyB64 = derived.key
 
             // Re-encrypt saved WebDAV password under new master key
             if let wdPass = savedWdPass, !webdavUrl.isEmpty, !webdavUser.isEmpty {
-                if let newPassEnc = try? SecureVaultCore.encryptVault(plaintext: wdPass, keyB64: newKey) {
+                if let newPassEnc = try? SecureVaultCore.encryptVault(plaintext: wdPass, keyB64: derived.key) {
                     try? SecureVaultCore.saveWebdavConfig(dataDir: dataDir, url: webdavUrl, username: webdavUser, passwordEnc: newPassEnc)
                 }
             }
@@ -408,7 +469,7 @@ final class VaultStore: ObservableObject {
             saveMeta()
             showToast(t("主密码已更新"))
             return true
-        } catch {
+        case .failure:
             showToast(t("创建失败"), warn: true)
             return false
         }
@@ -423,7 +484,7 @@ final class VaultStore: ObservableObject {
               !rawFile.isEmpty else {
             return false
         }
-        let parsed = splitVaultFileContent(rawFile)
+        let parsed = Self.splitVaultFileContent(rawFile)
         if let s = parsed.salt {
             saltB64 = s
         }
@@ -964,7 +1025,7 @@ final class VaultStore: ObservableObject {
     }
 
     private func applyDownloadedVault(_ dl: WebDavDownload, webdavPass: String, showToastOnSuccess: Bool) {
-        let parsed = splitVaultFileContent(dl.content)
+        let parsed = Self.splitVaultFileContent(dl.content)
         let sameSalt = (parsed.salt == nil || parsed.salt == saltB64)
         if sameSalt, let plain = try? SecureVaultCore.decryptVault(ciphertextB64: parsed.cipher, keyB64: masterKeyB64) {
             applyDecryptedPayloadJSON(plain)
@@ -979,15 +1040,27 @@ final class VaultStore: ObservableObject {
         }
     }
 
-    func unlockAndApplyRemoteVault(password: String) -> Bool {
+    func unlockAndApplyRemoteVault(password: String) async -> Bool {
+        guard !isBusy else { return false }
         guard let dl = pendingRemoteDownload else {
             showRemotePasswordPrompt = false
             return false
         }
-        let parsed = splitVaultFileContent(dl.content)
+        let parsed = Self.splitVaultFileContent(dl.content)
         let remoteSalt = parsed.salt ?? saltB64
-        guard !remoteSalt.isEmpty,
-              let result = deriveAndDecrypt(password: password, salt: remoteSalt, cipher: parsed.cipher) else {
+        guard !remoteSalt.isEmpty else {
+            showToast(t("主密码不正确"), warn: true)
+            return false
+        }
+
+        isBusy = true
+        let cipher = parsed.cipher
+        let result = await Task.detached(priority: .userInitiated) {
+            Self.deriveAndDecryptOffMain(password: password, salt: remoteSalt, cipher: cipher)
+        }.value
+        isBusy = false
+
+        guard let result else {
             showToast(t("主密码不正确"), warn: true)
             return false
         }
@@ -1018,6 +1091,7 @@ final class VaultStore: ObservableObject {
     }
 
     func restoreFromWebDav(url: String, username: String, webdavPassword: String, masterPassword: String) async -> Bool {
+        guard !isBusy, !webdavSyncing else { return false }
         let u = url.trimmingCharacters(in: .whitespacesAndNewlines)
         let user = username.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !u.isEmpty, !user.isEmpty, !webdavPassword.isEmpty, !masterPassword.isEmpty else {
@@ -1030,22 +1104,31 @@ final class VaultStore: ObservableObject {
         }
 
         webdavSyncing = true
+        isBusy = true
+        defer {
+            webdavSyncing = false
+            isBusy = false
+        }
+
         let dlRes = await Task.detached(priority: .userInitiated) {
             Result { try SecureVaultCore.webdavDownload(url: u, username: user, password: webdavPassword) }
         }.value
-        webdavSyncing = false
 
         switch dlRes {
         case .failure(let err):
             showToast(err.localizedDescription, warn: true)
             return false
         case .success(let dl):
-            let parsed = splitVaultFileContent(dl.content)
+            let parsed = Self.splitVaultFileContent(dl.content)
             guard let remoteSalt = parsed.salt, !remoteSalt.isEmpty else {
                 showToast(t("文件解析失败"), warn: true)
                 return false
             }
-            guard let dec = deriveAndDecrypt(password: masterPassword, salt: remoteSalt, cipher: parsed.cipher) else {
+            let cipher = parsed.cipher
+            let dec = await Task.detached(priority: .userInitiated) {
+                Self.deriveAndDecryptOffMain(password: masterPassword, salt: remoteSalt, cipher: cipher)
+            }.value
+            guard let dec else {
                 showToast(t("主密码不正确"), warn: true)
                 return false
             }
@@ -1103,17 +1186,22 @@ final class VaultStore: ObservableObject {
         return try JSONSerialization.data(withJSONObject: envelope, options: [.prettyPrinted])
     }
 
-    func buildKdbxExport(password: String) throws -> Data {
-        let tmpPath = FileManager.default.temporaryDirectory
-            .appendingPathComponent("sv_export_\(UUID().uuidString).kdbx").path
-        defer { try? FileManager.default.removeItem(atPath: tmpPath) }
+    func buildKdbxExport(password: String) async throws -> Data {
+        guard !isBusy else { throw RustCoreError.message("Busy") }
+        isBusy = true
+        defer { isBusy = false }
 
         let itemsObj: [String: Any] = ["items": activeItems.map { $0.toJSON() }]
         let itemsData = try JSONSerialization.data(withJSONObject: itemsObj)
         let itemsJson = String(data: itemsData, encoding: .utf8) ?? "{\"items\":[]}"
 
-        try SecureVaultCore.exportKdbx(path: tmpPath, itemsJson: itemsJson, password: password)
-        return try Data(contentsOf: URL(fileURLWithPath: tmpPath))
+        return try await Task.detached(priority: .userInitiated) {
+            let tmpPath = FileManager.default.temporaryDirectory
+                .appendingPathComponent("sv_export_\(UUID().uuidString).kdbx").path
+            defer { try? FileManager.default.removeItem(atPath: tmpPath) }
+            try SecureVaultCore.exportKdbx(path: tmpPath, itemsJson: itemsJson, password: password)
+            return try Data(contentsOf: URL(fileURLWithPath: tmpPath))
+        }.value
     }
 
     // MARK: - Import (Encrypted/Plain JSON, KDBX, CSV)
@@ -1136,132 +1224,139 @@ final class VaultStore: ObservableObject {
         return try? SecureVaultCore.readExportFile(path: url.path)
     }
 
-    func parseImportFile(url: URL, kind: ImportSourceKind, password: String?) throws -> ParsedImportResult {
+    func parseImportFile(url: URL, kind: ImportSourceKind, password: String?) async throws -> ParsedImportResult {
+        guard !isBusy else { throw RustCoreError.message("Busy") }
+        isBusy = true
+        defer { isBusy = false }
+
         let accessed = url.startAccessingSecurityScopedResource()
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
 
+        let filePath = url.path
         let fileName = url.lastPathComponent
         let ext = url.pathExtension.lowercased()
 
-        // 1. KeePass (.kdbx)
-        if kind == .kdbx || ext == "kdbx" {
-            let pwd = password ?? ""
-            let jsonOut = try SecureVaultCore.importKdbx(path: url.path, password: pwd)
-            guard let data = jsonOut.data(using: .utf8),
-                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                throw RustCoreError.message(t("文件解析失败"))
-            }
-            let rawItems = (obj["items"] as? [[String: Any]]) ?? []
-            let parsedItems = rawItems.map { raw -> VaultItem in
-                var item = VaultItem.fromJSON(raw)
-                // Extract otpauth:// from custom fields if present
-                if item.otpSecret.isEmpty,
-                   let custom = raw["custom"] as? [String: Any],
-                   let otpUri = custom["otp"] as? String,
-                   let parsedOtp = try? SecureVaultCore.parseOtpauthUri(otpUri) {
-                    item.otpSecret = parsedOtp.secret
-                }
-                return item
-            }
-            let folderNames = (obj["folders"] as? [String]) ?? []
-            let parsedFolders = folderNames.compactMap { name -> VaultFolderRecord? in
-                let norm = VaultHelpers.normalizeFolderName(name)
-                return norm == VaultHelpers.defaultFolderKey ? nil : VaultFolderRecord(id: UUID().uuidString, name: norm, icon: "folder")
-            }
-            return ParsedImportResult(badge: "KeePass (.kdbx)", fileName: fileName, items: parsedItems, folders: parsedFolders, standaloneTotps: [])
-        }
-
-        // 2. Read text content for JSON or CSV
-        let content = try SecureVaultCore.readExportFile(path: url.path)
-
-        // 3. Try JSON
-        if let data = content.data(using: .utf8),
-           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            if (root["isEncrypted"] as? Bool) == true {
+        return try await Task.detached(priority: .userInitiated) {
+            // 1. KeePass (.kdbx)
+            if kind == .kdbx || ext == "kdbx" {
                 let pwd = password ?? ""
-                let salt = (root["salt"] as? String) ?? ""
-                let encPayload = (root["encryptedPayload"] as? String) ?? ""
-                let preferredKdf = (root["kdf"] as? String) ?? "argon2id"
-                let fallbackKdf = preferredKdf == "argon2id" ? "pbkdf2" : "argon2id"
-
-                var plainStr: String? = nil
-                for kdf in [preferredKdf, fallbackKdf] {
-                    if let key = try? SecureVaultCore.deriveMasterKey(password: pwd, saltB64: salt, kdf: kdf),
-                       let dec = try? SecureVaultCore.decryptVault(ciphertextB64: encPayload, keyB64: key) {
-                        plainStr = dec
-                        break
-                    }
-                }
-                guard let plain = plainStr else {
-                    throw RustCoreError.message(t("解密失败，请检查文件密码"))
-                }
-                if let expectedChecksum = root["checksum"] as? String, !expectedChecksum.isEmpty {
-                    let actual = try SecureVaultCore.computeSha256(plain)
-                    if actual.lowercased() != expectedChecksum.lowercased() {
-                        throw RustCoreError.message(t("解密失败，请检查文件密码"))
-                    }
-                }
-                guard let pData = plain.data(using: .utf8),
-                      let pRoot = try? JSONSerialization.jsonObject(with: pData) as? [String: Any] else {
+                let jsonOut = try SecureVaultCore.importKdbx(path: filePath, password: pwd)
+                guard let data = jsonOut.data(using: .utf8),
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                     throw RustCoreError.message(t("文件解析失败"))
                 }
-                return parsePlainJsonObject(pRoot, badge: t("锁匣加密备份"), fileName: fileName)
-            } else {
-                return parsePlainJsonObject(root, badge: "JSON", fileName: fileName)
+                let rawItems = (obj["items"] as? [[String: Any]]) ?? []
+                let parsedItems = rawItems.map { raw -> VaultItem in
+                    var item = VaultItem.fromJSON(raw)
+                    // Extract otpauth:// from custom fields if present
+                    if item.otpSecret.isEmpty,
+                       let custom = raw["custom"] as? [String: Any],
+                       let otpUri = custom["otp"] as? String,
+                       let parsedOtp = try? SecureVaultCore.parseOtpauthUri(otpUri) {
+                        item.otpSecret = parsedOtp.secret
+                    }
+                    return item
+                }
+                let folderNames = (obj["folders"] as? [String]) ?? []
+                let parsedFolders = folderNames.compactMap { name -> VaultFolderRecord? in
+                    let norm = VaultHelpers.normalizeFolderName(name)
+                    return norm == VaultHelpers.defaultFolderKey ? nil : VaultFolderRecord(id: UUID().uuidString, name: norm, icon: "folder")
+                }
+                return ParsedImportResult(badge: "KeePass (.kdbx)", fileName: fileName, items: parsedItems, folders: parsedFolders, standaloneTotps: [])
             }
-        }
 
-        // 4. Parse CSV (Chrome / Edge / Safari / Firefox / Bitwarden)
-        let rows = VaultHelpers.parseCSV(content)
-        guard rows.count >= 2 else {
-            throw RustCoreError.message(t("文件解析失败"))
-        }
-        let header = rows[0].map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-        func idxOf(_ candidates: [String]) -> Int? {
-            for c in candidates {
-                if let i = header.firstIndex(of: c) { return i }
-            }
-            return nil
-        }
-        let titleIdx = idxOf(["name", "title", "名称", "标题"])
-        let urlIdx = idxOf(["url", "website", "uri", "login_uri", "网址"])
-        let userIdx = idxOf(["username", "login_username", "user", "账号", "用户名"])
-        let passIdx = idxOf(["password", "login_password", "密码"])
-        let noteIdx = idxOf(["note", "notes", "备注"])
-        let folderIdx = idxOf(["folder", "group", "分组", "文件夹"])
+            // 2. Read text content for JSON or CSV
+            let content = try SecureVaultCore.readExportFile(path: filePath)
 
-        var parsedItems: [VaultItem] = []
-        for row in rows.dropFirst() {
-            let get: (Int?) -> String = { i in
-                guard let i, i < row.count else { return "" }
-                return row[i].trimmingCharacters(in: .whitespacesAndNewlines)
+            // 3. Try JSON
+            if let data = content.data(using: .utf8),
+               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                if (root["isEncrypted"] as? Bool) == true {
+                    let pwd = password ?? ""
+                    let salt = (root["salt"] as? String) ?? ""
+                    let encPayload = (root["encryptedPayload"] as? String) ?? ""
+                    let preferredKdf = (root["kdf"] as? String) ?? "argon2id"
+                    let fallbackKdf = preferredKdf == "argon2id" ? "pbkdf2" : "argon2id"
+
+                    var plainStr: String? = nil
+                    for kdf in [preferredKdf, fallbackKdf] {
+                        if let key = try? SecureVaultCore.deriveMasterKey(password: pwd, saltB64: salt, kdf: kdf),
+                           let dec = try? SecureVaultCore.decryptVault(ciphertextB64: encPayload, keyB64: key) {
+                            plainStr = dec
+                            break
+                        }
+                    }
+                    guard let plain = plainStr else {
+                        throw RustCoreError.message(t("解密失败，请检查文件密码"))
+                    }
+                    if let expectedChecksum = root["checksum"] as? String, !expectedChecksum.isEmpty {
+                        let actual = try SecureVaultCore.computeSha256(plain)
+                        if actual.lowercased() != expectedChecksum.lowercased() {
+                            throw RustCoreError.message(t("解密失败，请检查文件密码"))
+                        }
+                    }
+                    guard let pData = plain.data(using: .utf8),
+                          let pRoot = try? JSONSerialization.jsonObject(with: pData) as? [String: Any] else {
+                        throw RustCoreError.message(t("文件解析失败"))
+                    }
+                    return Self.parsePlainJsonObject(pRoot, badge: t("锁匣加密备份"), fileName: fileName)
+                } else {
+                    return Self.parsePlainJsonObject(root, badge: "JSON", fileName: fileName)
+                }
             }
-            let urlVal = get(urlIdx)
-            let userVal = get(userIdx)
-            let passVal = get(passIdx)
-            var titleVal = get(titleIdx)
-            if titleVal.isEmpty {
-                titleVal = URL(string: urlVal)?.host ?? (urlVal.isEmpty ? userVal : urlVal)
+
+            // 4. Parse CSV (Chrome / Edge / Safari / Firefox / Bitwarden)
+            let rows = VaultHelpers.parseCSV(content)
+            guard rows.count >= 2 else {
+                throw RustCoreError.message(t("文件解析失败"))
             }
-            guard !titleVal.isEmpty || !passVal.isEmpty else { continue }
-            let folderVal = VaultHelpers.normalizeFolderName(get(folderIdx))
-            parsedItems.append(VaultItem(
-                id: UUID().uuidString,
-                type: .login,
-                title: titleVal.isEmpty ? "Imported" : titleVal,
-                folder: folderVal,
-                username: userVal,
-                password: passVal,
-                url: urlVal,
-                notes: get(noteIdx),
-                updatedAt: VaultHelpers.currentUpdatedAtString(),
-                strength: VaultHelpers.computePasswordStrength(passVal)
-            ))
-        }
-        return ParsedImportResult(badge: "CSV", fileName: fileName, items: parsedItems, folders: [], standaloneTotps: [])
+            let header = rows[0].map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            func idxOf(_ candidates: [String]) -> Int? {
+                for c in candidates {
+                    if let i = header.firstIndex(of: c) { return i }
+                }
+                return nil
+            }
+            let titleIdx = idxOf(["name", "title", "名称", "标题"])
+            let urlIdx = idxOf(["url", "website", "uri", "login_uri", "网址"])
+            let userIdx = idxOf(["username", "login_username", "user", "账号", "用户名"])
+            let passIdx = idxOf(["password", "login_password", "密码"])
+            let noteIdx = idxOf(["note", "notes", "备注"])
+            let folderIdx = idxOf(["folder", "group", "分组", "文件夹"])
+
+            var parsedItems: [VaultItem] = []
+            for row in rows.dropFirst() {
+                let get: (Int?) -> String = { i in
+                    guard let i, i < row.count else { return "" }
+                    return row[i].trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                let urlVal = get(urlIdx)
+                let userVal = get(userIdx)
+                let passVal = get(passIdx)
+                var titleVal = get(titleIdx)
+                if titleVal.isEmpty {
+                    titleVal = URL(string: urlVal)?.host ?? (urlVal.isEmpty ? userVal : urlVal)
+                }
+                guard !titleVal.isEmpty || !passVal.isEmpty else { continue }
+                let folderVal = VaultHelpers.normalizeFolderName(get(folderIdx))
+                parsedItems.append(VaultItem(
+                    id: UUID().uuidString,
+                    type: .login,
+                    title: titleVal.isEmpty ? "Imported" : titleVal,
+                    folder: folderVal,
+                    username: userVal,
+                    password: passVal,
+                    url: urlVal,
+                    notes: get(noteIdx),
+                    updatedAt: VaultHelpers.currentUpdatedAtString(),
+                    strength: VaultHelpers.computePasswordStrength(passVal)
+                ))
+            }
+            return ParsedImportResult(badge: "CSV", fileName: fileName, items: parsedItems, folders: [], standaloneTotps: [])
+        }.value
     }
 
-    private func parsePlainJsonObject(_ root: [String: Any], badge: String, fileName: String) -> ParsedImportResult {
+    nonisolated private static func parsePlainJsonObject(_ root: [String: Any], badge: String, fileName: String) -> ParsedImportResult {
         let rawList = (root["vaultItems"] as? [[String: Any]])
             ?? (root["items"] as? [[String: Any]])
             ?? []
@@ -1335,7 +1430,8 @@ final class VaultStore: ObservableObject {
         )
     }
 
-    func executeImport(parsed: ParsedImportResult, strategy: ImportStrategy, newMasterPassword: String? = nil) -> Bool {
+    func executeImport(parsed: ParsedImportResult, strategy: ImportStrategy, newMasterPassword: String? = nil) async -> Bool {
+        guard !isBusy else { return false }
         // If importing during onboarding (no local vault yet), initialize vault with newMasterPassword
         if !hasVault {
             let pwd = newMasterPassword ?? ""
@@ -1343,10 +1439,21 @@ final class VaultStore: ObservableObject {
                 showToast(t("主密码至少 8 位"), warn: true)
                 return false
             }
-            do {
-                saltB64 = try SecureVaultCore.generateSalt()
-                masterKeyB64 = try SecureVaultCore.deriveMasterKey(password: pwd, saltB64: saltB64, kdf: "argon2id")
-            } catch {
+            isBusy = true
+            let derivedResult = await Task.detached(priority: .userInitiated) { () -> Result<(salt: String, key: String), Error> in
+                Result {
+                    let salt = try SecureVaultCore.generateSalt()
+                    let key = try SecureVaultCore.deriveMasterKey(password: pwd, saltB64: salt, kdf: "argon2id")
+                    return (salt: salt, key: key)
+                }
+            }.value
+            isBusy = false
+
+            switch derivedResult {
+            case .success(let derived):
+                saltB64 = derived.salt
+                masterKeyB64 = derived.key
+            case .failure:
                 showToast(t("创建失败"), warn: true)
                 return false
             }

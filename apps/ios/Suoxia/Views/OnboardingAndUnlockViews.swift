@@ -1,12 +1,22 @@
 import LocalAuthentication
 import SwiftUI
 
+private enum ActiveOnboardingSheet: Identifiable {
+    case createVault, webdavRestore, importFlow
+
+    var id: Int {
+        switch self {
+        case .createVault: return 0
+        case .webdavRestore: return 1
+        case .importFlow: return 2
+        }
+    }
+}
+
 struct OnboardingView: View {
     @ObservedObject var store: VaultStore
-    @State private var showCreateVault = false
+    @State private var activeSheet: ActiveOnboardingSheet? = nil
     @State private var showRestoreChoices = false
-    @State private var showWebDavRestore = false
-    @State private var showImportFlow = false
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -70,7 +80,7 @@ struct OnboardingView: View {
                 // Bottom CTAs
                 VStack(spacing: 10) {
                     Button {
-                        showCreateVault = true
+                        activeSheet = .createVault
                     } label: {
                         Text(t("创建新保险箱"))
                             .font(.system(size: 14, weight: .semibold))
@@ -101,26 +111,31 @@ struct OnboardingView: View {
             .padding(.horizontal, 24)
         }
         .background(AppTheme.pageBackground(store.isDark).ignoresSafeArea())
-        .sheet(isPresented: $showCreateVault) {
-            CreateVaultSheet(store: store)
-                .svSheetPresentation(.large)
-        }
         .confirmationDialog(t("选择恢复方式"), isPresented: $showRestoreChoices, titleVisibility: .visible) {
             Button(t("从 WebDAV 云端恢复")) {
-                showWebDavRestore = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    activeSheet = .webdavRestore
+                }
             }
             Button(t("导入本地备份文件")) {
-                showImportFlow = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                    activeSheet = .importFlow
+                }
             }
             Button(t("取消"), role: .cancel) {}
         }
-        .sheet(isPresented: $showWebDavRestore) {
-            WebDavSheet(store: store, isOnboardingRestore: true)
-                .svSheetPresentation(.large)
-        }
-        .sheet(isPresented: $showImportFlow) {
-            ImportFlowSheet(store: store)
-                .svSheetPresentation(.large)
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .createVault:
+                CreateVaultSheet(store: store)
+                    .svSheetPresentation(.large)
+            case .webdavRestore:
+                WebDavSheet(store: store, isOnboardingRestore: true)
+                    .svSheetPresentation(.large)
+            case .importFlow:
+                ImportFlowSheet(store: store)
+                    .svSheetPresentation(.large)
+            }
         }
     }
 }
@@ -270,23 +285,32 @@ struct CreateVaultSheet: View {
                             store.showToast(t("两次密码输入不一致"), warn: true)
                             return
                         }
-                        if store.createFreshVault(password: pwd1) {
-                            dismiss()
+                        Task {
+                            if await store.createFreshVault(password: pwd1) {
+                                dismiss()
+                            }
                         }
                     } label: {
-                        Text(t("创建并进入"))
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 46)
-                            .background(AppTheme.brand)
-                            .cornerRadius(16)
+                        HStack(spacing: 8) {
+                            if store.isBusy {
+                                ProgressView().tint(.white)
+                            }
+                            Text(t("创建并进入"))
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                        .background(AppTheme.brand)
+                        .cornerRadius(16)
                     }
+                    .disabled(store.isBusy)
                 }
                 .padding(16)
             }
         }
         .background(AppTheme.pageBackground(store.isDark).ignoresSafeArea())
+        .svToastOverlay(store: store)
     }
 }
 
@@ -299,26 +323,32 @@ struct UnlockView: View {
     @State private var forcePasswordMode = false
     @State private var gestureFails = 0
 
+    private var deviceBiometryType: LABiometryType {
+        KeychainAndBiometrics.biometryType
+    }
+
     private var useGesture: Bool {
         !forcePasswordMode && store.gestureOn && !store.gesturePattern.isEmpty
     }
 
     private var bioButtonLabel: String? {
-        if store.bioFaceOn && store.bioFingerOn {
-            return t("Face ID 解锁（优先）")
+        switch deviceBiometryType {
+        case .faceID:
+            return store.bioFaceOn ? t("Face ID 解锁") : nil
+        case .touchID:
+            return store.bioFingerOn ? t("Touch ID 解锁") : nil
+        default:
+            return nil
         }
-        if store.bioFaceOn {
-            return t("Face ID 解锁")
-        }
-        if store.bioFingerOn {
-            return t("Touch ID 解锁")
-        }
-        return nil
+    }
+
+    private var bioIconName: String {
+        deviceBiometryType == .touchID ? "touchid" : "faceid"
     }
 
     private var subtitleText: String {
         if useGesture {
-            return (store.bioFaceOn || store.bioFingerOn)
+            return bioButtonLabel != nil
                 ? t("可划动九宫格，或点击下方使用面容/指纹")
                 : t("请绘制手势图案以解锁")
         }
@@ -416,25 +446,34 @@ struct UnlockView: View {
                     )
 
                     Button {
-                        if store.unlockWithPassword(pwd) {
-                            pwd = ""
+                        let input = pwd
+                        Task {
+                            if await store.unlockWithPassword(input) {
+                                pwd = ""
+                            }
                         }
                     } label: {
-                        Text(t("解锁"))
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 46)
-                            .background(AppTheme.brand)
-                            .cornerRadius(16)
+                        HStack(spacing: 8) {
+                            if store.isBusy {
+                                ProgressView().tint(.white)
+                            }
+                            Text(t("解锁"))
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                        .background(AppTheme.brand)
+                        .cornerRadius(16)
                     }
+                    .disabled(store.isBusy)
 
                     if let bioLabel = bioButtonLabel {
                         Button {
                             store.unlockWithBiometrics()
                         } label: {
                             HStack(spacing: 8) {
-                                Image(systemName: store.bioFaceOn ? "faceid" : "touchid")
+                                Image(systemName: bioIconName)
                                     .font(.system(size: 16))
                                     .foregroundColor(AppTheme.brand)
                                 Text(bioLabel)
@@ -545,6 +584,7 @@ struct GestureSetupSheet: View {
             Spacer()
         }
         .background(AppTheme.pageBackground(store.isDark).ignoresSafeArea())
+        .svToastOverlay(store: store)
     }
 }
 
@@ -590,31 +630,42 @@ struct VerifyMasterPasswordSheet: View {
                         .cornerRadius(12)
                         .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppTheme.borderColor(store.isDark), lineWidth: 0.8))
                 }
+                .disabled(store.isBusy)
 
                 Button {
                     if pwd.isEmpty {
                         store.showToast(t("请输入当前主密码"), warn: true)
                         return
                     }
-                    if store.verifyMasterPassword(pwd) {
-                        dismiss()
-                        onVerified()
-                    } else {
-                        store.showToast(t("当前主密码不正确"), warn: true)
+                    let input = pwd
+                    Task {
+                        if await store.verifyMasterPassword(input) {
+                            onVerified()
+                            dismiss()
+                        } else {
+                            store.showToast(t("当前主密码不正确"), warn: true)
+                        }
                     }
                 } label: {
-                    Text(t("确认开启"))
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 44)
-                        .background(AppTheme.brand)
-                        .cornerRadius(12)
+                    HStack(spacing: 6) {
+                        if store.isBusy {
+                            ProgressView().tint(.white)
+                        }
+                        Text(t("确认开启"))
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .background(AppTheme.brand)
+                    .cornerRadius(12)
                 }
+                .disabled(store.isBusy)
             }
             .padding(.bottom, 16)
         }
         .padding(.horizontal, 20)
         .background(AppTheme.pageBackground(store.isDark).ignoresSafeArea())
+        .svToastOverlay(store: store)
     }
 }

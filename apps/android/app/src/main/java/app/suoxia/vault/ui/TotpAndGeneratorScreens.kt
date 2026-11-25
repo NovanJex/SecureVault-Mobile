@@ -323,19 +323,21 @@ fun GeneratorTabScreen(
 
     var showClearConfirm by remember { mutableStateOf(false) }
 
-    fun nextPassword(): String {
+    fun nextPassword(recordHistory: Boolean = false): String {
         val out = if (mode == "random") {
             RustCore.generatePassword(length, upper, lower, numbers, symbols, excludeAmbiguous)
         } else {
             RustCore.generateBip39(bipWords, bipSep, bipCap)
         }
-        vm.addGenHistory(out)
+        if (recordHistory) {
+            vm.addGenHistory(out)
+        }
         return out
     }
 
     var currentPwd by remember { mutableStateOf("") }
     LaunchedEffect(Unit) {
-        if (currentPwd.isEmpty()) currentPwd = nextPassword()
+        if (currentPwd.isEmpty()) currentPwd = nextPassword(recordHistory = false)
     }
 
     val strengthBadge = if (mode == "random") {
@@ -428,7 +430,7 @@ fun GeneratorTabScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(Color(0xFF1E293B))
-                                .clickable { currentPwd = nextPassword() }
+                                .clickable { currentPwd = nextPassword(recordHistory = true) }
                                 .padding(horizontal = 12.dp, vertical = 6.dp)
                         ) {
                             Text(t("换一个"), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
@@ -438,6 +440,7 @@ fun GeneratorTabScreen(
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(SvIndigo)
                                 .clickable {
+                                    vm.addGenHistory(currentPwd)
                                     BiometricAndKeystoreManager.copySensitive(ctx, t("密码"), currentPwd)
                                     vm.showToast(tf("已复制%s", t("密码")))
                                 }
@@ -462,7 +465,10 @@ fun GeneratorTabScreen(
                         value = length.toFloat(),
                         onValueChange = {
                             length = it.toInt()
-                            currentPwd = nextPassword()
+                            currentPwd = nextPassword(recordHistory = false)
+                        },
+                        onValueChangeFinished = {
+                            vm.addGenHistory(currentPwd)
                         },
                         valueRange = 8f..48f,
                         colors = SliderDefaults.colors(thumbColor = SvIndigo, activeTrackColor = SvIndigo)
@@ -496,7 +502,10 @@ fun GeneratorTabScreen(
                         value = bipWords.toFloat(),
                         onValueChange = {
                             bipWords = it.toInt()
-                            currentPwd = nextPassword()
+                            currentPwd = nextPassword(recordHistory = false)
+                        },
+                        onValueChangeFinished = {
+                            vm.addGenHistory(currentPwd)
                         },
                         valueRange = 3f..10f,
                         steps = 6,

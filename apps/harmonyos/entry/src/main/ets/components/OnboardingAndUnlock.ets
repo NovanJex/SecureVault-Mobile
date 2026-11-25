@@ -45,97 +45,103 @@ export struct OnboardingView {
   }
 
   build() {
-    Column() {
-      Column({ space: 14 }) {
-        Stack() {
-          Circle({ width: 92, height: 92 }).fill('#224F46E5')
-          Circle({ width: 72, height: 72 }).fill('#2E4F46E5')
+    Scroll() {
+      Column({ space: 20 }) {
+        Column({ space: 14 }) {
           Stack() {
-            Text('🛡')
-              .fontSize(26)
-              .fontColor('#FFFFFF')
+            Circle({ width: 92, height: 92 }).fill('#224F46E5')
+            Circle({ width: 72, height: 72 }).fill('#2E4F46E5')
+            Stack() {
+              Text('🛡')
+                .fontSize(26)
+                .fontColor('#FFFFFF')
+            }
+            .width(56)
+            .height(56)
+            .borderRadius(28)
+            .linearGradient({
+              angle: 135,
+              colors: [['#4F46E5', 0.0], ['#7C3AED', 1.0]],
+            })
           }
-          .width(56)
-          .height(56)
-          .borderRadius(28)
-          .linearGradient({
-            angle: 135,
-            colors: [['#4F46E5', 0.0], ['#7C3AED', 1.0]],
-          })
+          Column({ space: 6 }) {
+            Text(t('锁匣 · SecureVault'))
+              .fontSize(21)
+              .fontWeight(FontWeight.Bold)
+              .fontColor(this.p().fgMain)
+            Text(t('本地加密密码管理器 · 手机与电脑安全同步'))
+              .fontSize(12)
+              .fontColor(this.p().fgMain)
+              .opacity(0.6)
+          }
         }
-        Column({ space: 6 }) {
-          Text(t('锁匣 · SecureVault'))
-            .fontSize(21)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(this.p().fgMain)
-          Text(t('本地加密密码管理器 · 手机与电脑安全同步'))
-            .fontSize(12)
-            .fontColor(this.p().fgMain)
-            .opacity(0.6)
+        .margin({ top: 36 })
+
+        Column({ space: 12 }) {
+          this.FeatureCard(
+            '🔒',
+            '#1A4F46E5',
+            '#4F46E5',
+            t('本地离线加密'),
+            t('不设官方服务器，主密码仅由你本人掌握')
+          )
+          this.FeatureCard(
+            '☁',
+            '#1A0284C7',
+            '#0284C7',
+            t('自主多端同步'),
+            t('连接个人网盘或 NAS，手机与电脑加密互通')
+          )
+          this.FeatureCard(
+            '◎',
+            '#1A059669',
+            '#059669',
+            t('灵活应用锁'),
+            t('支持面容、指纹与手势密码，按需自由开启')
+          )
         }
-      }
-      .margin({ top: 36 })
+        .padding({ left: 24, right: 24 })
 
-      Column({ space: 12 }) {
-        this.FeatureCard(
-          '🔒',
-          '#1A4F46E5',
-          '#4F46E5',
-          t('本地离线加密'),
-          t('不设官方服务器，主密码仅由你本人掌握')
-        )
-        this.FeatureCard(
-          '☁',
-          '#1A0284C7',
-          '#0284C7',
-          t('自主多端同步'),
-          t('连接个人网盘或 NAS，手机与电脑加密互通')
-        )
-        this.FeatureCard(
-          '◎',
-          '#1A059669',
-          '#059669',
-          t('灵活应用锁'),
-          t('支持面容、指纹与手势密码，按需自由开启')
-        )
-      }
-      .padding({ left: 24, right: 24 })
+        Column({ space: 10 }) {
+          Button(t('创建新保险箱'))
+            .width('100%')
+            .height(48)
+            .borderRadius(24)
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#FFFFFF')
+            .backgroundColor(Color.Transparent)
+            .linearGradient({
+              angle: 90,
+              colors: [['#4F46E5', 0.0], ['#7C3AED', 1.0]],
+            })
+            .onClick(() => {
+              this.onCreateVault();
+            })
 
-      Column({ space: 10 }) {
-        Button(t('创建新保险箱'))
-          .width('100%')
-          .height(48)
-          .borderRadius(24)
-          .fontSize(14)
-          .fontWeight(FontWeight.Medium)
-          .fontColor('#FFFFFF')
-          .backgroundColor(Color.Transparent)
-          .linearGradient({
-            angle: 90,
-            colors: [['#4F46E5', 0.0], ['#7C3AED', 1.0]],
-          })
-          .onClick(() => {
-            this.onCreateVault();
-          })
-
-        Button(t('从备份恢复或导入'))
-          .width('100%')
-          .height(48)
-          .borderRadius(24)
-          .fontSize(14)
-          .fontWeight(FontWeight.Medium)
-          .backgroundColor(this.p().bgCard)
-          .fontColor(this.p().fgMain)
-          .border({ width: 1, color: this.p().border })
-          .onClick(() => {
-            this.onRestoreBackup();
-          })
+          Button(t('从备份恢复或导入'))
+            .width('100%')
+            .height(48)
+            .borderRadius(24)
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .backgroundColor(this.p().bgCard)
+            .fontColor(this.p().fgMain)
+            .border({ width: 1, color: this.p().border })
+            .onClick(() => {
+              this.onRestoreBackup();
+            })
+        }
+        .padding({ left: 24, right: 24, bottom: 28 })
       }
-      .padding({ left: 24, right: 24, bottom: 28 })
+      .width('100%')
+      .constraintSize({ minHeight: '100%' })
+      .justifyContent(FlexAlign.SpaceBetween)
     }
     .width('100%')
     .height('100%')
-    .justifyContent(FlexAlign.SpaceBetween)
+    .layoutWeight(1)
+    .scrollBar(BarState.Off)
   }
 }
 
@@ -146,6 +152,7 @@ export struct CreateVaultSheet {
   @Local pwd2: string = '';
   @Local showPwd1: boolean = false;
   @Local showPwd2: boolean = false;
+  @Local submitting: boolean = false;
 
   private p(): ThemePalette {
     return getPalette(vaultStore.theme);
@@ -347,7 +354,7 @@ export struct CreateVaultSheet {
           .backgroundColor(this.p().bgSub)
           .border({ width: 1, color: this.p().border })
 
-          Button(t('创建并进入'))
+          Button(this.submitting ? t('处理中...') : t('创建并进入'))
             .width('100%')
             .height(46)
             .borderRadius(16)
@@ -355,7 +362,8 @@ export struct CreateVaultSheet {
             .fontWeight(FontWeight.Medium)
             .backgroundColor(this.p().brand)
             .fontColor('#FFFFFF')
-            .onClick(() => {
+            .enabled(!this.submitting)
+            .onClick(async () => {
               if (this.pwd1.length < 8) {
                 vaultStore.showToast(t('主密码至少 8 位'), true);
                 return;
@@ -364,8 +372,14 @@ export struct CreateVaultSheet {
                 vaultStore.showToast(t('两次密码输入不一致'), true);
                 return;
               }
-              if (vaultStore.createFreshVault(this.pwd1)) {
-                this.onClose();
+              this.submitting = true;
+              try {
+                const ok = await vaultStore.createFreshVault(this.pwd1);
+                if (ok) {
+                  this.onClose();
+                }
+              } finally {
+                this.submitting = false;
               }
             })
         }
@@ -383,6 +397,7 @@ export struct UnlockView {
   @Local unlockPwd: string = '';
   @Local showPwd: boolean = false;
   @Local forcePwdUnlock: boolean = false;
+  @Local unlocking: boolean = false;
 
   private p(): ThemePalette {
     return getPalette(vaultStore.theme);
@@ -394,147 +409,160 @@ export struct UnlockView {
       vaultStore.bioFingerOn
     );
     if (ok) {
-      vaultStore.unlockWithBiometricSuccess();
+      await vaultStore.unlockWithBiometricSuccess();
     }
   }
 
   build() {
-    Column() {
-      Column({ space: 10 }) {
-        Stack() {
-          Text('🔒').fontSize(28).fontColor('#FFFFFF')
+    Scroll() {
+      Column({ space: 20 }) {
+        Column({ space: 10 }) {
+          Stack() {
+            Text('🔒').fontSize(28).fontColor('#FFFFFF')
+          }
+          .width(64)
+          .height(64)
+          .borderRadius(20)
+          .backgroundColor(this.p().brand)
+
+          Text(t('锁匣已锁定'))
+            .fontSize(20)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(this.p().fgMain)
+
+          Text(
+            vaultStore.gestureOn && !this.forcePwdUnlock
+              ? t('绘制手势图案或验证生物特征以解锁')
+              : t('请验证身份以解锁')
+          )
+            .fontSize(12)
+            .fontColor(this.p().fgMain)
+            .opacity(0.6)
         }
-        .width(64)
-        .height(64)
-        .borderRadius(20)
-        .backgroundColor(this.p().brand)
+        .margin({ top: 48 })
 
-        Text(t('锁匣已锁定'))
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(this.p().fgMain)
-
-        Text(
-          vaultStore.gestureOn && !this.forcePwdUnlock
-            ? t('绘制手势图案或验证生物特征以解锁')
-            : t('请验证身份以解锁')
-        )
-          .fontSize(12)
-          .fontColor(this.p().fgMain)
-          .opacity(0.6)
-      }
-      .margin({ top: 48 })
-
-      if (vaultStore.gestureOn && !this.forcePwdUnlock) {
-        Column({ space: 20 }) {
-          GesturePad({
-            onPatternComplete: (pat: string) => {
-              vaultStore.unlockWithGesture(pat);
-            },
-          })
-          Row({ space: 20 }) {
-            if (vaultStore.bioFaceOn || vaultStore.bioFingerOn) {
-              Text(vaultStore.bioFaceOn ? t('面容识别解锁') : t('指纹识别解锁'))
+        if (vaultStore.gestureOn && !this.forcePwdUnlock) {
+          Column({ space: 20 }) {
+            GesturePad({
+              onPatternComplete: (pat: string) => {
+                vaultStore.unlockWithGesture(pat);
+              },
+            })
+            Row({ space: 20 }) {
+              if (vaultStore.bioFaceOn || vaultStore.bioFingerOn) {
+                Text(vaultStore.bioFaceOn ? t('面容识别解锁') : t('指纹识别解锁'))
+                  .fontSize(13)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(this.p().brand)
+                  .onClick(() => {
+                    this.runBiometric();
+                  })
+              }
+              Text(t('改用主密码'))
                 .fontSize(13)
                 .fontWeight(FontWeight.Medium)
                 .fontColor(this.p().brand)
                 .onClick(() => {
+                  this.forcePwdUnlock = true;
+                })
+            }
+          }
+        } else {
+          Column({ space: 12 }) {
+            Row({ space: 6 }) {
+              TextInput({ placeholder: t('输入主密码'), text: this.unlockPwd })
+                .type(this.showPwd ? InputType.Normal : InputType.Password)
+                .showPasswordIcon(false)
+                .fontSize(12)
+                .fontColor(this.p().fgMain)
+                .placeholderColor(this.p().placeholder)
+                .placeholderFont({ size: 12 })
+                .backgroundColor(Color.Transparent)
+                .layoutWeight(1)
+                .height('100%')
+                .onChange((v: string) => {
+                  this.unlockPwd = v;
+                })
+              Text(this.showPwd ? t('隐藏') : t('显示'))
+                .fontSize(11)
+                .fontColor(this.p().fgMain)
+                .opacity(0.55)
+                .padding({ left: 6, right: 4 })
+                .onClick(() => {
+                  this.showPwd = !this.showPwd;
+                })
+            }
+            .width('100%')
+            .height(44)
+            .padding({ left: 14, right: 10 })
+            .borderRadius(12)
+            .backgroundColor(this.p().bgCard)
+            .border({ width: 1, color: this.p().border })
+
+            Button(this.unlocking ? t('处理中...') : t('解锁'))
+              .width('100%')
+              .height(46)
+              .borderRadius(16)
+              .fontSize(14)
+              .fontWeight(FontWeight.Medium)
+              .backgroundColor(this.p().brand)
+              .fontColor('#FFFFFF')
+              .enabled(!this.unlocking)
+              .onClick(async () => {
+                this.unlocking = true;
+                try {
+                  const ok = await vaultStore.unlockWithPassword(this.unlockPwd);
+                  if (ok) {
+                    this.unlockPwd = '';
+                  }
+                } finally {
+                  this.unlocking = false;
+                }
+              })
+
+            if (vaultStore.bioFaceOn || vaultStore.bioFingerOn) {
+              Button(vaultStore.bioFaceOn ? t('面容识别解锁') : t('指纹识别解锁'))
+                .width('100%')
+                .height(44)
+                .borderRadius(16)
+                .fontSize(13)
+                .fontWeight(FontWeight.Medium)
+                .backgroundColor(this.p().bgCard)
+                .fontColor(this.p().fgMain)
+                .border({ width: 1, color: this.p().border })
+                .onClick(() => {
                   this.runBiometric();
                 })
             }
-            Text(t('改用主密码'))
-              .fontSize(13)
-              .fontWeight(FontWeight.Medium)
-              .fontColor(this.p().brand)
-              .onClick(() => {
-                this.forcePwdUnlock = true;
-              })
+
+            if (vaultStore.gestureOn) {
+              Text(t('改用手势密码解锁'))
+                .fontSize(13)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(this.p().brand)
+                .margin({ top: 4 })
+                .onClick(() => {
+                  this.forcePwdUnlock = false;
+                })
+            }
           }
+          .padding({ left: 24, right: 24 })
         }
-      } else {
-        Column({ space: 12 }) {
-          Row({ space: 6 }) {
-            TextInput({ placeholder: t('输入主密码'), text: this.unlockPwd })
-              .type(this.showPwd ? InputType.Normal : InputType.Password)
-              .showPasswordIcon(false)
-              .fontSize(12)
-              .fontColor(this.p().fgMain)
-              .placeholderColor(this.p().placeholder)
-              .placeholderFont({ size: 12 })
-              .backgroundColor(Color.Transparent)
-              .layoutWeight(1)
-              .height('100%')
-              .onChange((v: string) => {
-                this.unlockPwd = v;
-              })
-            Text(this.showPwd ? t('隐藏') : t('显示'))
-              .fontSize(11)
-              .fontColor(this.p().fgMain)
-              .opacity(0.55)
-              .padding({ left: 6, right: 4 })
-              .onClick(() => {
-                this.showPwd = !this.showPwd;
-              })
-          }
-          .width('100%')
-          .height(44)
-          .padding({ left: 14, right: 10 })
-          .borderRadius(12)
-          .backgroundColor(this.p().bgCard)
-          .border({ width: 1, color: this.p().border })
 
-          Button(t('解锁'))
-            .width('100%')
-            .height(46)
-            .borderRadius(16)
-            .fontSize(14)
-            .fontWeight(FontWeight.Medium)
-            .backgroundColor(this.p().brand)
-            .fontColor('#FFFFFF')
-            .onClick(() => {
-              if (vaultStore.unlockWithPassword(this.unlockPwd)) {
-                this.unlockPwd = '';
-              }
-            })
-
-          if (vaultStore.bioFaceOn || vaultStore.bioFingerOn) {
-            Button(vaultStore.bioFaceOn ? t('面容识别解锁') : t('指纹识别解锁'))
-              .width('100%')
-              .height(44)
-              .borderRadius(16)
-              .fontSize(13)
-              .fontWeight(FontWeight.Medium)
-              .backgroundColor(this.p().bgCard)
-              .fontColor(this.p().fgMain)
-              .border({ width: 1, color: this.p().border })
-              .onClick(() => {
-                this.runBiometric();
-              })
-          }
-
-          if (vaultStore.gestureOn) {
-            Text(t('改用手势密码解锁'))
-              .fontSize(13)
-              .fontWeight(FontWeight.Medium)
-              .fontColor(this.p().brand)
-              .margin({ top: 4 })
-              .onClick(() => {
-                this.forcePwdUnlock = false;
-              })
-          }
-        }
-        .padding({ left: 24, right: 24 })
+        Text(t('本地数据已加密保护'))
+          .fontSize(11)
+          .fontColor(this.p().fgMain)
+          .opacity(0.45)
+          .margin({ bottom: 24 })
       }
-
-      Text(t('本地数据已加密保护'))
-        .fontSize(11)
-        .fontColor(this.p().fgMain)
-        .opacity(0.45)
-        .margin({ bottom: 24 })
+      .width('100%')
+      .constraintSize({ minHeight: '100%' })
+      .justifyContent(FlexAlign.SpaceBetween)
     }
     .width('100%')
     .height('100%')
-    .justifyContent(FlexAlign.SpaceBetween)
+    .layoutWeight(1)
+    .scrollBar(BarState.Off)
   }
 }
 

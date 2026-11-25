@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
@@ -12,7 +13,6 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
@@ -24,14 +24,15 @@ import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.VerifiedUser
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.fragment.app.FragmentActivity
 import app.suoxia.vault.bridge.RustCore
 import app.suoxia.vault.i18n.t
@@ -46,6 +47,7 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         BiometricAndKeystoreManager.setPrivacyScreen(this, vm.privacyMask)
         setContent {
             SuoxiaRootApp(activity = this, vm = vm)
@@ -95,6 +97,9 @@ fun SuoxiaRootApp(activity: FragmentActivity, vm: VaultViewModel) {
                 resolver = ctx.contentResolver,
                 sourceType = importSource,
                 onNeedsPassword = { path, name, badge ->
+                    if (stagedPath.isNotEmpty() && stagedPath != path) {
+                        vm.cleanupStagedImportFile(stagedPath)
+                    }
                     stagedPath = path
                     stagedFileName = name
                     stagedBadge = badge
@@ -125,6 +130,12 @@ fun SuoxiaRootApp(activity: FragmentActivity, vm: VaultViewModel) {
         }
     }
 
+    LaunchedEffect(vm.isDark) {
+        val controller = WindowInsetsControllerCompat(activity.window, activity.window.decorView)
+        controller.isAppearanceLightStatusBars = !vm.isDark
+        controller.isAppearanceLightNavigationBars = !vm.isDark
+    }
+
     LaunchedEffect(vm.toastMsg) {
         if (vm.toastMsg != null) {
             delay(2300)
@@ -132,147 +143,131 @@ fun SuoxiaRootApp(activity: FragmentActivity, vm: VaultViewModel) {
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(p.bg)) {
-        when (vm.screen) {
-            AppScreen.ONBOARDING -> OnboardingScreen(
-                p = p,
-                vm = vm,
-                onOpenWebDavRestore = {
-                    webDavOnboardingMode = true
-                    showWebDavSheet = true
-                },
-                onOpenImport = {
-                    importStep = "pick"
-                    importPreview = null
-                    showImportSheet = true
-                }
-            )
-            AppScreen.UNLOCK -> UnlockScreen(p = p, activity = activity, vm = vm)
-            AppScreen.HOME -> HomeShell(
-                p = p,
-                activity = activity,
-                vm = vm,
-                onOpenWebDav = {
-                    webDavOnboardingMode = false
-                    showWebDavSheet = true
-                },
-                onOpenImport = {
-                    importStep = "pick"
-                    importPreview = null
-                    showImportSheet = true
-                },
-                onOpenExport = {
-                    showExportFormatSheet = true
-                }
-            )
-        }
-
-        // Global WebDAV Sheet
-        if (showWebDavSheet) {
-            WebDavSheet(
-                p = p,
-                vm = vm,
-                isOnboardingRestore = webDavOnboardingMode,
-                onDismiss = { showWebDavSheet = false }
-            )
-        }
-
-        // Global Import Flow Sheet
-        if (showImportSheet) {
-            ImportFlowSheet(
-                p = p,
-                vm = vm,
-                step = importStep,
-                sourceType = importSource,
-                stagedFileName = stagedFileName,
-                stagedBadge = stagedBadge,
-                stagedPath = stagedPath,
-                previewData = importPreview,
-                onSelectSourceAndLaunchPicker = { src ->
-                    importSource = src
-                    openImportDocLauncher.launch(arrayOf("*/*"))
-                },
-                onDecryptSubmit = { pwd ->
-                    vm.decryptImportFile(stagedPath, stagedFileName, importSource, pwd) { preview ->
-                        importPreview = preview
-                        importStep = "preview"
+    CompositionLocalProvider(LocalSvToastState provides SvToastState(vm.toastMsg, vm.toastWarn)) {
+        Box(modifier = Modifier.fillMaxSize().background(p.bg)) {
+            when (vm.screen) {
+                AppScreen.ONBOARDING -> OnboardingScreen(
+                    p = p,
+                    vm = vm,
+                    onOpenWebDavRestore = {
+                        webDavOnboardingMode = true
+                        showWebDavSheet = true
+                    },
+                    onOpenImport = {
+                        importStep = "pick"
+                        importPreview = null
+                        showImportSheet = true
                     }
-                },
-                onResetToPick = {
-                    importStep = "pick"
-                    importPreview = null
-                },
-                onDismiss = {
-                    showImportSheet = false
-                    importStep = "pick"
-                    importPreview = null
-                }
-            )
-        }
-
-        // Export Format Sheet
-        if (showExportFormatSheet) {
-            ExportFormatSheet(
-                p = p,
-                onDismiss = { showExportFormatSheet = false },
-                onPickJson = {
-                    val fileName = "SecureVault_Backup_${todayDateString()}.json"
-                    pendingExportName = fileName
-                    createJsonExportLauncher.launch(fileName)
-                },
-                onPickKdbx = {
-                    showKdbxPwdDialog = true
-                }
-            )
-        }
-
-        if (showKdbxPwdDialog) {
-            KdbxExportPasswordDialog(
-                p = p,
-                onDismiss = { showKdbxPwdDialog = false },
-                onConfirm = { pwd ->
-                    showKdbxPwdDialog = false
-                    pendingKdbxPassword = pwd
-                    val fileName = "SecureVault_${todayDateString()}.kdbx"
-                    pendingExportName = fileName
-                    createKdbxExportLauncher.launch(fileName)
-                }
-            )
-        }
-
-        // WebDAV Conflict Sheet & Remote Salt Master Password Dialog
-        if (vm.showWebdavConflictSheet) {
-            WebDavConflictSheet(p = p, vm = vm)
-        }
-        if (vm.showRemoteSaltPwdDialog) {
-            RemoteSaltPasswordDialog(p = p, vm = vm)
-        }
-
-        // Toast HUD
-        vm.toastMsg?.let { msg ->
-            Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = Color(0xF20F172A),
-                shadowElevation = 8.dp,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = 84.dp, start = 24.dp, end = 24.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = if (vm.toastWarn) "!" else "✓",
-                        color = if (vm.toastWarn) Color(0xFFFBBF24) else Color(0xFF34D399),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
-                    )
-                    Text(msg, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                }
+                )
+                AppScreen.UNLOCK -> UnlockScreen(p = p, activity = activity, vm = vm)
+                AppScreen.HOME -> HomeShell(
+                    p = p,
+                    activity = activity,
+                    vm = vm,
+                    onOpenWebDav = {
+                        webDavOnboardingMode = false
+                        showWebDavSheet = true
+                    },
+                    onOpenImport = {
+                        importStep = "pick"
+                        importPreview = null
+                        showImportSheet = true
+                    },
+                    onOpenExport = {
+                        showExportFormatSheet = true
+                    }
+                )
             }
+
+            // Global WebDAV Sheet
+            if (showWebDavSheet) {
+                WebDavSheet(
+                    p = p,
+                    vm = vm,
+                    isOnboardingRestore = webDavOnboardingMode,
+                    onDismiss = { showWebDavSheet = false }
+                )
+            }
+
+            // Global Import Flow Sheet
+            if (showImportSheet) {
+                ImportFlowSheet(
+                    p = p,
+                    vm = vm,
+                    step = importStep,
+                    sourceType = importSource,
+                    stagedFileName = stagedFileName,
+                    stagedBadge = stagedBadge,
+                    stagedPath = stagedPath,
+                    previewData = importPreview,
+                    onSelectSourceAndLaunchPicker = { src ->
+                        importSource = src
+                        openImportDocLauncher.launch(arrayOf("*/*"))
+                    },
+                    onDecryptSubmit = { pwd ->
+                        vm.decryptImportFile(stagedPath, stagedFileName, importSource, pwd) { preview ->
+                            stagedPath = ""
+                            importPreview = preview
+                            importStep = "preview"
+                        }
+                    },
+                    onResetToPick = {
+                        vm.cleanupStagedImportFile(stagedPath)
+                        stagedPath = ""
+                        importStep = "pick"
+                        importPreview = null
+                    },
+                    onDismiss = {
+                        vm.cleanupStagedImportFile(stagedPath)
+                        stagedPath = ""
+                        showImportSheet = false
+                        importStep = "pick"
+                        importPreview = null
+                    }
+                )
+            }
+
+            // Export Format Sheet
+            if (showExportFormatSheet) {
+                ExportFormatSheet(
+                    p = p,
+                    onDismiss = { showExportFormatSheet = false },
+                    onPickJson = {
+                        val fileName = "SecureVault_Backup_${todayDateString()}.json"
+                        pendingExportName = fileName
+                        createJsonExportLauncher.launch(fileName)
+                    },
+                    onPickKdbx = {
+                        showKdbxPwdDialog = true
+                    }
+                )
+            }
+
+            if (showKdbxPwdDialog) {
+                KdbxExportPasswordDialog(
+                    p = p,
+                    onDismiss = { showKdbxPwdDialog = false },
+                    onEmptyPassword = { vm.showToast(t("请输入导出密码"), true) },
+                    onConfirm = { pwd ->
+                        showKdbxPwdDialog = false
+                        pendingKdbxPassword = pwd
+                        val fileName = "SecureVault_${todayDateString()}.kdbx"
+                        pendingExportName = fileName
+                        createKdbxExportLauncher.launch(fileName)
+                    }
+                )
+            }
+
+            // WebDAV Conflict Sheet & Remote Salt Master Password Dialog
+            if (vm.showWebdavConflictSheet) {
+                WebDavConflictSheet(p = p, vm = vm)
+            }
+            if (vm.showRemoteSaltPwdDialog) {
+                RemoteSaltPasswordDialog(p = p, vm = vm)
+            }
+
+            // Toast HUD
+            SvToastOverlay(bottomPadding = 84.dp)
         }
     }
 }
@@ -316,28 +311,6 @@ fun HomeShell(
         } else {
             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
-    }
-
-    if (showQrScanner) {
-        QrScannerScreen(
-            onScanned = { uri ->
-                showQrScanner = false
-                try {
-                    val (issuer, acc, sec) = RustCore.parseOtpauthUri(uri)
-                    if (qrTargetMode == "standalone") {
-                        vm.addStandaloneTotp(issuer, acc, sec)
-                        showAddTotpSheet = false
-                    } else {
-                        scannedOtpForEdit = sec
-                        vm.showToast(t("已识别并填入验证密钥"))
-                    }
-                } catch (e: Exception) {
-                    vm.showToast(e.message ?: t("无效二维码"), true)
-                }
-            },
-            onClose = { showQrScanner = false }
-        )
-        return
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -464,5 +437,38 @@ fun HomeShell(
                 editingItem = null
             }
         )
+    }
+
+    if (showQrScanner) {
+        Dialog(
+            onDismissRequest = { showQrScanner = false },
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false
+            )
+        ) {
+            QrScannerScreen(
+                onScanned = { uri ->
+                    showQrScanner = false
+                    try {
+                        val (issuer, acc, sec) = RustCore.parseOtpauthUri(uri)
+                        if (qrTargetMode == "standalone") {
+                            vm.addStandaloneTotp(issuer, acc, sec)
+                            showAddTotpSheet = false
+                        } else {
+                            scannedOtpForEdit = sec
+                            vm.showToast(t("已识别并填入验证密钥"))
+                        }
+                    } catch (e: Exception) {
+                        vm.showToast(e.message ?: t("无效二维码"), true)
+                    }
+                },
+                onClose = { showQrScanner = false },
+                onError = { errMsg ->
+                    vm.showToast(errMsg, true)
+                    showQrScanner = false
+                }
+            )
+        }
     }
 }

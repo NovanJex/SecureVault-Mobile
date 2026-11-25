@@ -52,6 +52,44 @@ val SvEmerald = Color(0xFF059669)
 val SvAmber = Color(0xFFD97706)
 val SvSky = Color(0xFF0284C7)
 
+data class SvToastState(
+    val message: String? = null,
+    val isWarn: Boolean = false
+)
+
+val LocalSvToastState = compositionLocalOf { SvToastState() }
+
+@Composable
+fun BoxScope.SvToastOverlay(bottomPadding: Dp = 24.dp) {
+    val toast = LocalSvToastState.current
+    toast.message?.let { msg ->
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = Color(0xF20F172A),
+            shadowElevation = 8.dp,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(bottom = bottomPadding, start = 24.dp, end = 24.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = if (toast.isWarn) "!" else "✓",
+                    color = if (toast.isWarn) Color(0xFFFBBF24) else Color(0xFF34D399),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+                Text(msg, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+    }
+}
+
 data class SvPalette(
     val isDark: Boolean,
     val bg: Color,
@@ -373,60 +411,64 @@ fun SvPageSheet(
             )
         }
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = maxHeight)
-                .navigationBarsPadding()
-        ) {
-            Row(
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(44.dp)
-                    .padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .heightIn(max = maxHeight)
+                    .navigationBarsPadding()
+                    .imePadding()
             ) {
-                if (leftLabel.startsWith("‹ ")) {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(p.sub)
-                            .border(0.8.dp, p.border, CircleShape)
-                            .clickable { onLeftClick() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.Filled.ChevronLeft,
-                            contentDescription = leftLabel.removePrefix("‹ "),
-                            tint = p.fg.copy(alpha = 0.8f),
-                            modifier = Modifier.size(18.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (leftLabel.startsWith("‹ ")) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(p.sub)
+                                .border(0.8.dp, p.border, CircleShape)
+                                .clickable { onLeftClick() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Filled.ChevronLeft,
+                                contentDescription = leftLabel.removePrefix("‹ "),
+                                tint = p.fg.copy(alpha = 0.8f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = leftLabel,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = p.fg.copy(alpha = 0.6f),
+                            modifier = Modifier.clickable { onLeftClick() }.padding(vertical = 6.dp)
                         )
                     }
-                } else {
                     Text(
-                        text = leftLabel,
+                        text = title,
                         fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = p.fg.copy(alpha = 0.6f),
-                        modifier = Modifier.clickable { onLeftClick() }.padding(vertical = 6.dp)
+                        fontWeight = FontWeight.Bold,
+                        color = p.fg,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
+                    Box(modifier = Modifier.defaultMinSize(minWidth = 40.dp), contentAlignment = Alignment.CenterEnd) {
+                        rightAction?.invoke()
+                    }
                 }
-                Text(
-                    text = title,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = p.fg,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Box(modifier = Modifier.defaultMinSize(minWidth = 40.dp), contentAlignment = Alignment.CenterEnd) {
-                    rightAction?.invoke()
-                }
+                HorizontalDivider(thickness = 1.dp, color = p.hairline)
+                content()
             }
-            HorizontalDivider(thickness = 1.dp, color = p.hairline)
-            content()
+            SvToastOverlay(bottomPadding = 16.dp)
         }
     }
 }
@@ -456,15 +498,19 @@ fun SvActionSheet(
             )
         }
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(top = 4.dp, bottom = 24.dp)
-                .navigationBarsPadding(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            content = content
-        )
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(top = 4.dp, bottom = 24.dp)
+                    .navigationBarsPadding()
+                    .imePadding(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                content = content
+            )
+            SvToastOverlay(bottomPadding = 16.dp)
+        }
     }
 }
 

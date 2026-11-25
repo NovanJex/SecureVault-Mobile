@@ -411,7 +411,11 @@ export struct WebDavSheet {
                     this.wdPass
                   );
                   if (ok) {
+                    vaultStore.showRemotePwdPrompt = false;
                     this.onClose();
+                    setTimeout(() => {
+                      vaultStore.showRemotePwdPrompt = true;
+                    }, 280);
                   }
                 } else {
                   if (vaultStore.saveWebDavSettings(this.wdUrl, this.wdUser, this.wdPass)) {
@@ -435,8 +439,22 @@ export struct WebDavSheet {
                 color: vaultStore.webdavConfigured ? this.p().brand : this.p().border,
               })
               .enabled(!vaultStore.webdavSyncing)
-              .onClick(() => {
-                vaultStore.syncWebDav(true);
+              .onClick(async () => {
+                await vaultStore.syncWebDav(true);
+                if (vaultStore.showRemotePwdPrompt || vaultStore.showWebDavConflict) {
+                  const needRemotePwd = vaultStore.showRemotePwdPrompt;
+                  const needConflict = vaultStore.showWebDavConflict;
+                  vaultStore.showRemotePwdPrompt = false;
+                  vaultStore.showWebDavConflict = false;
+                  this.onClose();
+                  setTimeout(() => {
+                    if (needRemotePwd) {
+                      vaultStore.showRemotePwdPrompt = true;
+                    } else if (needConflict) {
+                      vaultStore.showWebDavConflict = true;
+                    }
+                  }, 280);
+                }
               })
 
             if (vaultStore.webdavConfigured) {
@@ -490,6 +508,11 @@ export struct ImportFlowSheet {
   @Local badge: string = '';
   @Local decryptPwd: string = '';
   @Local showDecryptPwd: boolean = false;
+  @Local onboardingPwd1: string = '';
+  @Local onboardingPwd2: string = '';
+  @Local showObPwd1: boolean = false;
+  @Local showObPwd2: boolean = false;
+  @Local busy: boolean = false;
   @Local parsedItems: VaultItem[] = [];
   @Local parsedFoldersCount: number = 0;
   @Local parsedTotpCount: number = 0;
@@ -498,10 +521,16 @@ export struct ImportFlowSheet {
     return getPalette(vaultStore.theme);
   }
 
+  private needsOnboardingMasterPwd(): boolean {
+    return !vaultStore.hasVault && this.decryptPwd.length < 8;
+  }
+
   private async pickSource(src: ImportSourceKey): Promise<void> {
     this.source = src;
     this.strategy = 'skip';
     this.decryptPwd = '';
+    this.onboardingPwd1 = '';
+    this.onboardingPwd2 = '';
     const ctx = getContext(this) as common.UIAbilityContext;
     let suffixes: string[] = ['.json'];
     if (src === 'kdbx') {
@@ -516,8 +545,9 @@ export struct ImportFlowSheet {
     }
     this.pickedFileName = picked.fileName;
     this.pickedTempPath = picked.tempPath;
+    this.busy = true;
     try {
-      const res = vaultStore.parseImportFile(src, picked.tempPath, '');
+      const res = await vaultStore.parseImportFile(src, picked.tempPath, '');
       this.badge = res.badge;
       if (res.needsPassword) {
         this.step = 'decrypt';
@@ -529,16 +559,19 @@ export struct ImportFlowSheet {
       }
     } catch (e) {
       vaultStore.showToast((e as Error).message, true);
+    } finally {
+      this.busy = false;
     }
   }
 
-  private runDecrypt(): void {
+  private async runDecrypt(): Promise<void> {
     if (this.decryptPwd.trim().length === 0) {
       vaultStore.showToast(t('请输入备份文件解密密码'), true);
       return;
     }
+    this.busy = true;
     try {
-      const res = vaultStore.parseImportFile(this.source, this.pickedTempPath, this.decryptPwd);
+      const res = await vaultStore.parseImportFile(this.source, this.pickedTempPath, this.decryptPwd);
       this.badge = res.badge;
       this.parsedItems = res.items;
       this.parsedFoldersCount = res.folders.length;
@@ -547,6 +580,8 @@ export struct ImportFlowSheet {
       vaultStore.showToast(t('备份文件解密成功'));
     } catch (_) {
       vaultStore.showToast(t('主密码不正确'), true);
+    } finally {
+      this.busy = false;
     }
   }
 
@@ -588,7 +623,34 @@ export struct ImportFlowSheet {
     return this.parsedItems.length;
   }
 
+  private async executeConfirmedImport(strategy: ImportStrategy, masterPwd: string): Promise<void> {
+    this.busy = true;
+    try {
+      const added = await vaultStore.executeImport(this.parsedItems, strategy, masterPwd);
+      if (added >= 0) {
+        this.onClose();
+      }
+    } finally {
+      this.busy = false;
+    }
+  }
+
   private confirmAndImport(): void {
+    if (this.busy) {
+      return;
+    }
+    const needPwd = this.needsOnboardingMasterPwd();
+    if (needPwd) {
+      if (this.onboardingPwd1.length < 8) {
+        vaultStore.showToast(t('主密码至少 8 位'), true);
+        return;
+      }
+      if (this.onboardingPwd1 !== this.onboardingPwd2) {
+        vaultStore.showToast(t('两次密码输入不一致'), true);
+        return;
+      }
+    }
+    const effectivePwd = needPwd ? this.onboardingPwd1 : this.decryptPwd;
     if (this.strategy === 'overwrite') {
       this.onRequestConfirm({
         title: t('确认覆盖当前保险箱？'),
@@ -600,14 +662,12 @@ export struct ImportFlowSheet {
         confirmLabel: t('确认覆盖'),
         isDanger: true,
         onConfirm: () => {
-          vaultStore.executeImport(this.parsedItems, 'overwrite', this.decryptPwd);
-          this.onClose();
+          this.executeConfirmedImport('overwrite', effectivePwd);
         },
       });
       return;
     }
-    vaultStore.executeImport(this.parsedItems, this.strategy, this.decryptPwd);
-    this.onClose();
+    this.executeConfirmedImport(this.strategy, effectivePwd);
   }
 
   @Builder
@@ -832,7 +892,7 @@ export struct ImportFlowSheet {
                 .backgroundColor(this.p().bgCard).border({ width: 1, color: this.p().border })
             }
 
-            Button(t('解密并解析文件'))
+            Button(this.busy ? t('处理中...') : t('解密并解析文件'))
               .width('100%')
               .height(46)
               .borderRadius(16)
@@ -840,6 +900,7 @@ export struct ImportFlowSheet {
               .fontWeight(FontWeight.Medium)
               .backgroundColor(this.p().brand)
               .fontColor('#FFFFFF')
+              .enabled(!this.busy)
               .onClick(() => {
                 this.runDecrypt();
               })
@@ -987,6 +1048,92 @@ export struct ImportFlowSheet {
               .backgroundColor(this.p().bgCard)
               .border({ width: 1, color: this.p().border })
             }
+            // Onboarding Master Password setup when importing into a brand-new vault without >=8-char file password
+            if (this.needsOnboardingMasterPwd()) {
+              Column({ space: 10 }) {
+                Column({ space: 3 }) {
+                  Text(t('设置本机主密码（至少 8 位）'))
+                    .fontSize(12)
+                    .fontWeight(FontWeight.Bold)
+                    .fontColor(this.p().fgMain)
+                  Text(t('首次导入需要设置本机主密码以加密保存凭证'))
+                    .fontSize(11)
+                    .fontColor(this.p().fgMain)
+                    .opacity(0.6)
+                }.width('100%').alignItems(HorizontalAlign.Start)
+
+                Row({ space: 6 }) {
+                  TextInput({ placeholder: t('设置本机主密码（至少 8 位）'), text: this.onboardingPwd1 })
+                    .type(this.showObPwd1 ? InputType.Normal : InputType.Password)
+                    .showPasswordIcon(false)
+                    .fontSize(12)
+                    .fontColor(this.p().fgMain)
+                    .placeholderColor(this.p().placeholder)
+                    .placeholderFont({ size: 12 })
+                    .backgroundColor(Color.Transparent)
+                    .layoutWeight(1)
+                    .height('100%')
+                    .onChange((v: string) => {
+                      this.onboardingPwd1 = v;
+                    })
+                  Text(this.showObPwd1 ? t('隐藏') : t('显示'))
+                    .fontSize(11)
+                    .fontColor(this.p().fgMain)
+                    .opacity(0.55)
+                    .padding({ left: 6, right: 4 })
+                    .onClick(() => {
+                      this.showObPwd1 = !this.showObPwd1;
+                    })
+                }
+                .width('100%')
+                .height(40)
+                .padding({ left: 12, right: 10 })
+                .borderRadius(12)
+                .backgroundColor(this.p().bgSub)
+                .border({ width: 1, color: this.p().border })
+
+                Row({ space: 6 }) {
+                  TextInput({ placeholder: t('确认主密码'), text: this.onboardingPwd2 })
+                    .type(this.showObPwd2 ? InputType.Normal : InputType.Password)
+                    .showPasswordIcon(false)
+                    .fontSize(12)
+                    .fontColor(this.p().fgMain)
+                    .placeholderColor(this.p().placeholder)
+                    .placeholderFont({ size: 12 })
+                    .backgroundColor(Color.Transparent)
+                    .layoutWeight(1)
+                    .height('100%')
+                    .onChange((v: string) => {
+                      this.onboardingPwd2 = v;
+                    })
+                  Text(this.showObPwd2 ? t('隐藏') : t('显示'))
+                    .fontSize(11)
+                    .fontColor(this.p().fgMain)
+                    .opacity(0.55)
+                    .padding({ left: 6, right: 4 })
+                    .onClick(() => {
+                      this.showObPwd2 = !this.showObPwd2;
+                    })
+                }
+                .width('100%')
+                .height(40)
+                .padding({ left: 12, right: 10 })
+                .borderRadius(12)
+                .backgroundColor(this.p().bgSub)
+                .border({
+                  width: 1,
+                  color:
+                    this.onboardingPwd2.length > 0 && this.onboardingPwd1 !== this.onboardingPwd2
+                      ? this.p().danger
+                      : this.p().border,
+                })
+              }
+              .width('100%')
+              .padding(14)
+              .borderRadius(16)
+              .backgroundColor(this.p().bgCard)
+              .border({ width: 1, color: this.p().border })
+            }
           }
           .padding(16)
         }
@@ -996,9 +1143,11 @@ export struct ImportFlowSheet {
         // Sticky Footer CTA
         Column() {
           Button(
-            this.strategy === 'overwrite'
-              ? tf('覆盖并导入（{n} 条）', 'Overwrite & Import ({n})', { 'n': this.finalImportCount() })
-              : tf('确认导入（{n} 条）', 'Confirm Import ({n})', { 'n': this.finalImportCount() })
+            this.busy
+              ? t('处理中...')
+              : (this.strategy === 'overwrite'
+                ? tf('覆盖并导入（{n} 条）', 'Overwrite & Import ({n})', { 'n': this.finalImportCount() })
+                : tf('确认导入（{n} 条）', 'Confirm Import ({n})', { 'n': this.finalImportCount() }))
           )
             .width('100%')
             .height(46)
@@ -1007,6 +1156,7 @@ export struct ImportFlowSheet {
             .fontWeight(FontWeight.Medium)
             .backgroundColor(this.strategy === 'overwrite' ? this.p().danger : this.p().brand)
             .fontColor('#FFFFFF')
+            .enabled(!this.busy)
             .onClick(() => {
               this.confirmAndImport();
             })
@@ -1030,6 +1180,7 @@ export struct ChangeMasterPwdSheet {
   @Local showCur: boolean = false;
   @Local showNew: boolean = false;
   @Local showConfirm: boolean = false;
+  @Local submitting: boolean = false;
 
   private p(): ThemePalette {
     return getPalette(vaultStore.theme);
@@ -1143,7 +1294,7 @@ export struct ChangeMasterPwdSheet {
             .padding({ left: 4, right: 4 })
             .width('100%')
 
-          Button(t('确认修改'))
+          Button(this.submitting ? t('处理中...') : t('确认修改'))
             .width('100%')
             .height(46)
             .borderRadius(16)
@@ -1152,7 +1303,8 @@ export struct ChangeMasterPwdSheet {
             .backgroundColor(this.p().brand)
             .fontColor('#FFFFFF')
             .margin({ top: 4 })
-            .onClick(() => {
+            .enabled(!this.submitting)
+            .onClick(async () => {
               if (this.newPwd.length < 8) {
                 vaultStore.showToast(t('主密码至少 8 位'), true);
                 return;
@@ -1161,8 +1313,14 @@ export struct ChangeMasterPwdSheet {
                 vaultStore.showToast(t('两次密码输入不一致'), true);
                 return;
               }
-              if (vaultStore.changeMasterPassword(this.curPwd, this.newPwd)) {
-                this.onClose();
+              this.submitting = true;
+              try {
+                const ok = await vaultStore.changeMasterPassword(this.curPwd, this.newPwd);
+                if (ok) {
+                  this.onClose();
+                }
+              } finally {
+                this.submitting = false;
               }
             })
         }
@@ -1180,6 +1338,7 @@ export struct VerifyPwdSheet {
   @Param onCancel: () => void = () => {};
   @Param onVerified: () => void = () => {};
   @Local pwd: string = '';
+  @Local verifying: boolean = false;
 
   private p(): ThemePalette {
     return getPalette(vaultStore.theme);
@@ -1231,7 +1390,7 @@ export struct VerifyPwdSheet {
           .onClick(() => {
             this.onCancel();
           })
-        Button(t('确认开启'))
+        Button(this.verifying ? t('处理中...') : t('确认开启'))
           .layoutWeight(1)
           .height(42)
           .borderRadius(12)
@@ -1239,17 +1398,24 @@ export struct VerifyPwdSheet {
           .fontWeight(FontWeight.Medium)
           .backgroundColor(this.p().brand)
           .fontColor('#FFFFFF')
-          .onClick(() => {
+          .enabled(!this.verifying)
+          .onClick(async () => {
             if (this.pwd.length === 0) {
               vaultStore.showToast(t('请输入当前主密码'), true);
               return;
             }
-            if (!vaultStore.verifyMasterPassword(this.pwd)) {
-              vaultStore.showToast(t('主密码不正确'), true);
-              return;
+            this.verifying = true;
+            try {
+              const ok = await vaultStore.verifyMasterPassword(this.pwd);
+              if (!ok) {
+                vaultStore.showToast(t('主密码不正确'), true);
+                return;
+              }
+              this.pwd = '';
+              this.onVerified();
+            } finally {
+              this.verifying = false;
             }
-            this.pwd = '';
-            this.onVerified();
           })
       }.width('100%')
     }

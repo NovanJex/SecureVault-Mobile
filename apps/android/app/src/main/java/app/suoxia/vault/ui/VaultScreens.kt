@@ -341,28 +341,76 @@ fun VaultTabScreen(
                                         horizontalArrangement = Arrangement.SpaceAround,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(
-                                            t("复制账号"),
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = SvIndigo,
-                                            modifier = Modifier.clickable {
-                                                BiometricAndKeystoreManager.copySensitive(ctx, t("账号"), item.username.ifEmpty { item.cardNumber })
-                                                vm.showToast(tf("已复制%s", t("账号")))
-                                                expandedQuickId = null
+                                        when (item.type) {
+                                            ItemType.LOGIN -> {
+                                                Text(
+                                                    t("复制账号"),
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = SvIndigo,
+                                                    modifier = Modifier.clickable {
+                                                        BiometricAndKeystoreManager.copySensitive(ctx, t("账号"), item.username)
+                                                        vm.showToast(tf("已复制%s", t("账号")))
+                                                        expandedQuickId = null
+                                                    }
+                                                )
+                                                Text(
+                                                    t("复制密码"),
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = SvIndigo,
+                                                    modifier = Modifier.clickable {
+                                                        BiometricAndKeystoreManager.copySensitive(ctx, t("密码"), item.password)
+                                                        vm.showToast(tf("已复制%s", t("密码")))
+                                                        expandedQuickId = null
+                                                    }
+                                                )
                                             }
-                                        )
-                                        Text(
-                                            t("复制密码"),
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = SvIndigo,
-                                            modifier = Modifier.clickable {
-                                                BiometricAndKeystoreManager.copySensitive(ctx, t("密码"), item.password)
-                                                vm.showToast(tf("已复制%s", t("密码")))
-                                                expandedQuickId = null
+                                            ItemType.CARD -> {
+                                                Text(
+                                                    t("复制卡号"),
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = SvIndigo,
+                                                    modifier = Modifier.clickable {
+                                                        BiometricAndKeystoreManager.copySensitive(ctx, t("卡号"), item.cardNumber)
+                                                        vm.showToast(tf("已复制%s", t("卡号")))
+                                                        expandedQuickId = null
+                                                    }
+                                                )
                                             }
-                                        )
+                                            ItemType.NOTE -> {
+                                                Text(
+                                                    t("复制内容"),
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = SvIndigo,
+                                                    modifier = Modifier.clickable {
+                                                        BiometricAndKeystoreManager.copySensitive(ctx, t("备忘"), item.notes)
+                                                        vm.showToast(tf("已复制%s", t("备忘")))
+                                                        expandedQuickId = null
+                                                    }
+                                                )
+                                            }
+                                            ItemType.IDENTITY -> {
+                                                val (idActionLabel, idCopyLabel, idCopyVal) = when {
+                                                    item.identityPhone.isNotBlank() -> Triple(t("复制手机号"), t("手机号"), item.identityPhone)
+                                                    item.identityEmail.isNotBlank() -> Triple(t("复制邮箱"), t("邮箱"), item.identityEmail)
+                                                    else -> Triple(t("复制姓名"), t("姓名"), item.identityName)
+                                                }
+                                                Text(
+                                                    idActionLabel,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = SvIndigo,
+                                                    modifier = Modifier.clickable {
+                                                        BiometricAndKeystoreManager.copySensitive(ctx, idCopyLabel, idCopyVal)
+                                                        vm.showToast(tf("已复制%s", idCopyLabel))
+                                                        expandedQuickId = null
+                                                    }
+                                                )
+                                            }
+                                        }
                                         Text(
                                             if (item.isFavorite) t("取消星标") else t("加星标"),
                                             fontSize = 12.sp,

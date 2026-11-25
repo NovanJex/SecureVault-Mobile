@@ -14,6 +14,7 @@ import app.suoxia.vault.bridge.WebDavStat
 import app.suoxia.vault.i18n.t
 import app.suoxia.vault.i18n.tf
 import app.suoxia.vault.model.*
+import app.suoxia.vault.security.BiometricAndKeystoreManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -28,11 +29,14 @@ import java.util.Locale
 import java.util.TimeZone
 
 class VaultViewModel(application: Application) : AndroidViewModel(application) {
+    private val appCtx = application.applicationContext
     private val dataDir = application.filesDir.absolutePath
     private val cacheDir = application.cacheDir
     private val metaFile = File(dataDir, "suoxia_meta.json")
 
     var screen by mutableStateOf(AppScreen.ONBOARDING)
+    val hasVault: Boolean get() = screen != AppScreen.ONBOARDING
+    var isBusy by mutableStateOf(false)
     var activeTab by mutableStateOf(HomeTab.VAULT)
     var items by mutableStateOf<List<VaultItem>>(emptyList())
     var folders by mutableStateOf<List<String>>(emptyList())
@@ -69,6 +73,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
 
     private var saltB64 = ""
     private var masterKeyB64 = ""
+    private var wrappedKeyB64 = ""
     private var rawRootJson: JSONObject = JSONObject()
     private var folderRecords: MutableList<FolderRecord> = mutableListOf()
     private var localDirty: Boolean = false
@@ -116,14 +121,19 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             }
             loadWebDavConfigMeta()
 
+            wrappedKeyB64 = meta.optString("wrappedKeyB64", "")
             val cachedKey = meta.optString("cachedKeyB64", "")
-            if (!requireUnlock && cachedKey.isNotEmpty()) {
-                masterKeyB64 = cachedKey
+            val autoKey = cachedKey.ifEmpty {
+                if (wrappedKeyB64.isNotEmpty()) BiometricAndKeystoreManager.unwrapKey(appCtx, wrappedKeyB64).orEmpty() else ""
+            }
+            if (!requireUnlock && autoKey.isNotEmpty()) {
+                masterKeyB64 = autoKey
                 try {
                     decryptLocalVault()
                     screen = AppScreen.HOME
                     onUnlockedTriggerSync()
                 } catch (_: Exception) {
+                    masterKeyB64 = ""
                     screen = AppScreen.UNLOCK
                 }
             } else {
@@ -158,6 +168,12 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun saveMeta() {
+        if (masterKeyB64.isNotEmpty()) {
+            val wrapped = BiometricAndKeystoreManager.wrapKey(appCtx, masterKeyB64)
+            if (wrapped.isNotEmpty()) {
+                wrappedKeyB64 = wrapped
+            }
+        }
         val obj = JSONObject().apply {
             put("hasVault", saltB64.isNotEmpty())
             put("saltB64", saltB64)
@@ -180,6 +196,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                     put("size", snap.size)
                 })
             }
+            put("wrappedKeyB64", wrappedKeyB64)
             put("cachedKeyB64", if (requireUnlock) "" else masterKeyB64)
         }
         metaFile.writeText(obj.toString())
@@ -229,25 +246,50 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     // Vault Create / Unlock / Change Master Password
     // ============================================================
 
-    fun createFreshVault(password: String): Boolean {
+    fun createFreshVault(password: String, onResult: (Boolean) -> Unit = {}) {
+        if (isBusy) return
         if (password.length < 8) {
             showToast(t("主密码至少 8 位"), true)
-            return false
+            onResult(false)
+            return
         }
-        saltB64 = RustCore.generateSalt()
-        masterKeyB64 = RustCore.deriveMasterKey(password, saltB64, "argon2id")
-        rawRootJson = JSONObject()
-        folderRecords = mutableListOf()
-        items = emptyList()
-        folders = emptyList()
-        standaloneTotps = emptyList()
-        activeFolder = ALL_FOLDERS
-        persistVault(triggerSync = false)
-        saveMeta()
-        screen = AppScreen.HOME
-        activeTab = HomeTab.VAULT
-        showToast(t("保险箱已创建"))
-        return true
+        isBusy = true
+        viewModelScope.launch {
+            val res = withContext(Dispatchers.Default) {
+                runCatching {
+                    val newSalt = RustCore.generateSalt()
+                    val newKey = RustCore.deriveMasterKey(password, newSalt, "argon2id")
+                    val emptyPayload = JSONObject().apply {
+                        put("items", JSONArray())
+                        put("folders", JSONArray())
+                        put("standaloneTotps", JSONArray())
+                    }.toString()
+                    val cipher = RustCore.encryptVault(emptyPayload, newKey)
+                    RustCore.saveVaultFile(dataDir, "$newSalt:$cipher")
+                    newSalt to newKey
+                }
+            }
+            isBusy = false
+            res.onSuccess { (newSalt, newKey) ->
+                saltB64 = newSalt
+                masterKeyB64 = newKey
+                rawRootJson = JSONObject()
+                folderRecords = mutableListOf()
+                items = emptyList()
+                folders = emptyList()
+                standaloneTotps = emptyList()
+                activeFolder = ALL_FOLDERS
+                localDirty = true
+                saveMeta()
+                screen = AppScreen.HOME
+                activeTab = HomeTab.VAULT
+                showToast(t("保险箱已创建"))
+                onResult(true)
+            }.onFailure { err ->
+                showToast(err.message ?: t("创建失败"), true)
+                onResult(false)
+            }
+        }
     }
 
     private fun parseVaultFileContent(raw: String): Pair<String, String> {
@@ -272,40 +314,76 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun unlockWithPassword(password: String): Boolean {
-        return try {
-            val raw = RustCore.loadVaultFile(dataDir)
-            if (raw.isBlank()) {
-                showToast(t("主密码不正确"), true)
-                return false
-            }
-            val (fileSalt, cipher) = parseVaultFileContent(raw)
-            val isLegacy = !raw.contains(':')
-            val (derivedKey, plain) = deriveAndDecryptWithFallback(password, fileSalt, cipher)
-            saltB64 = fileSalt
-            masterKeyB64 = derivedKey
-            applyDecryptedPayload(plain)
-            if (isLegacy) {
-                persistVault(triggerSync = false)
-            }
-            saveMeta()
-            screen = AppScreen.HOME
-            showToast(t("锁匣已解锁"))
-            onUnlockedTriggerSync()
-            true
-        } catch (_: Exception) {
+    fun unlockWithPassword(password: String, onResult: (Boolean) -> Unit = {}) {
+        if (isBusy) return
+        if (password.isEmpty()) {
             showToast(t("主密码不正确"), true)
-            false
+            onResult(false)
+            return
+        }
+        isBusy = true
+        viewModelScope.launch {
+            val res = withContext(Dispatchers.Default) {
+                runCatching {
+                    val raw = RustCore.loadVaultFile(dataDir)
+                    if (raw.isBlank()) throw IllegalStateException("ERR_VAULT_EMPTY")
+                    val (fileSalt, cipher) = parseVaultFileContent(raw)
+                    val isLegacy = !raw.contains(':')
+                    val (derivedKey, plain) = deriveAndDecryptWithFallback(password, fileSalt, cipher)
+                    Triple(fileSalt, derivedKey, plain to isLegacy)
+                }
+            }
+            isBusy = false
+            res.onSuccess { (fileSalt, derivedKey, pair) ->
+                val (plain, isLegacy) = pair
+                saltB64 = fileSalt
+                masterKeyB64 = derivedKey
+                applyDecryptedPayload(plain)
+                if (isLegacy) {
+                    persistVault(triggerSync = false)
+                }
+                saveMeta()
+                screen = AppScreen.HOME
+                showToast(t("锁匣已解锁"))
+                onUnlockedTriggerSync()
+                onResult(true)
+            }.onFailure {
+                showToast(t("主密码不正确"), true)
+                onResult(false)
+            }
         }
     }
 
-    fun unlockWithBiometricSuccess() {
-        if (masterKeyB64.isEmpty() && metaFile.exists()) {
-            val meta = JSONObject(metaFile.readText())
-            masterKeyB64 = meta.optString("cachedKeyB64", "")
+    private fun tryRecoverMasterKeyForColdStart(): Boolean {
+        if (masterKeyB64.isNotEmpty()) return true
+        var wrapped = wrappedKeyB64
+        var cached = ""
+        if (metaFile.exists()) {
+            runCatching {
+                val meta = JSONObject(metaFile.readText())
+                if (wrapped.isEmpty()) wrapped = meta.optString("wrappedKeyB64", "")
+                cached = meta.optString("cachedKeyB64", "")
+            }
         }
-        if (masterKeyB64.isNotEmpty()) {
-            runCatching { decryptLocalVault() }
+        val unwrapped = if (wrapped.isNotEmpty()) {
+            BiometricAndKeystoreManager.unwrapKey(appCtx, wrapped)
+        } else null
+        val recovered = unwrapped?.takeIf { it.isNotEmpty() } ?: cached
+        if (recovered.isEmpty()) return false
+        masterKeyB64 = recovered
+        return true
+    }
+
+    fun unlockWithBiometricSuccess() {
+        if (!tryRecoverMasterKeyForColdStart() || masterKeyB64.isEmpty()) {
+            showToast(t("无法恢复密钥，请使用主密码解锁"), true)
+            return
+        }
+        val decrypted = runCatching { decryptLocalVault() }.isSuccess
+        if (!decrypted) {
+            masterKeyB64 = ""
+            showToast(t("密钥解密失败，请使用主密码解锁"), true)
+            return
         }
         screen = AppScreen.HOME
         showToast(t("生物识别验证通过"))
@@ -313,28 +391,31 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun unlockWithGesture(pattern: String): Boolean {
-        return if (pattern == gesturePattern && gesturePattern.isNotEmpty()) {
-            if (masterKeyB64.isEmpty() && metaFile.exists()) {
-                val meta = JSONObject(metaFile.readText())
-                masterKeyB64 = meta.optString("cachedKeyB64", "")
-            }
-            if (masterKeyB64.isNotEmpty()) {
-                runCatching { decryptLocalVault() }
-            }
-            screen = AppScreen.HOME
-            showToast(t("手势验证通过"))
-            onUnlockedTriggerSync()
-            true
-        } else {
+        if (pattern != gesturePattern || gesturePattern.isEmpty()) {
             showToast(t("手势图案错误，请重试"), true)
-            false
+            return false
         }
+        if (!tryRecoverMasterKeyForColdStart() || masterKeyB64.isEmpty()) {
+            showToast(t("无法恢复密钥，请使用主密码解锁"), true)
+            return false
+        }
+        val decrypted = runCatching { decryptLocalVault() }.isSuccess
+        if (!decrypted) {
+            masterKeyB64 = ""
+            showToast(t("密钥解密失败，请使用主密码解锁"), true)
+            return false
+        }
+        screen = AppScreen.HOME
+        showToast(t("手势验证通过"))
+        onUnlockedTriggerSync()
+        return true
     }
 
-    fun verifyMasterPassword(password: String): Boolean {
+    private fun verifyMasterPasswordSync(password: String): Boolean {
         if (password.isEmpty()) return false
         return try {
             val raw = RustCore.loadVaultFile(dataDir)
+            if (raw.isBlank()) return false
             val (fileSalt, cipher) = parseVaultFileContent(raw)
             deriveAndDecryptWithFallback(password, fileSalt, cipher)
             true
@@ -343,7 +424,24 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun verifyMasterPassword(password: String, onResult: (Boolean) -> Unit) {
+        if (isBusy) return
+        if (password.isEmpty()) {
+            onResult(false)
+            return
+        }
+        isBusy = true
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.Default) {
+                verifyMasterPasswordSync(password)
+            }
+            isBusy = false
+            onResult(ok)
+        }
+    }
+
     fun changeMasterPassword(oldPwd: String, newPwd: String, confirmPwd: String, onSuccess: () -> Unit) {
+        if (isBusy) return
         if (oldPwd.isEmpty()) {
             showToast(t("输入当前主密码"), true)
             return
@@ -356,9 +454,10 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             showToast(t("两次密码输入不一致"), true)
             return
         }
+        isBusy = true
         viewModelScope.launch {
             val ok = withContext(Dispatchers.Default) {
-                if (!verifyMasterPassword(oldPwd)) return@withContext false
+                if (!verifyMasterPasswordSync(oldPwd)) return@withContext false
                 val oldKey = masterKeyB64
                 val oldWdCfg = runCatching { RustCore.getWebdavConfig(dataDir) }.getOrNull()
                 val oldWdPass = if (oldWdCfg != null && oldWdCfg.passwordEnc.isNotEmpty() && oldKey.isNotEmpty()) {
@@ -378,6 +477,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
                 saveMeta()
                 true
             }
+            isBusy = false
             if (ok) {
                 showToast(t("主密码已更新"))
                 scheduleDebouncedUpload()
@@ -390,7 +490,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun decryptLocalVault() {
         val raw = RustCore.loadVaultFile(dataDir)
-        if (raw.isBlank()) return
+        if (raw.isBlank()) throw IllegalStateException("ERR_VAULT_EMPTY")
         val (fileSalt, cipher) = parseVaultFileContent(raw)
         if (fileSalt.isNotEmpty()) saltB64 = fileSalt
         val plain = RustCore.decryptVault(cipher, masterKeyB64)
@@ -1499,83 +1599,125 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         return rows
     }
 
+    fun cleanupStagedImportFile(path: String) {
+        if (path.isNotBlank()) {
+            runCatching { File(path).delete() }
+        }
+    }
+
     fun executeImport(
         preview: ImportPreviewData,
         strategy: ImportStrategy,
-        onboardingMasterPwd: String? = null
+        onboardingMasterPwd: String? = null,
+        onResult: (Boolean) -> Unit = {}
     ) {
+        if (isBusy) return
         val isFromOnboarding = screen == AppScreen.ONBOARDING
-        if (isFromOnboarding) {
-            val pwd = onboardingMasterPwd?.takeIf { it.length >= 8 }
+        val resolvedOnboardingPwd = if (isFromOnboarding) {
+            onboardingMasterPwd?.takeIf { it.length >= 8 }
                 ?: preview.sourcePassword?.takeIf { it.length >= 8 }
-                ?: "SecureVault#2026"
-            saltB64 = RustCore.generateSalt()
-            masterKeyB64 = RustCore.deriveMasterKey(pwd, saltB64, "argon2id")
-            rawRootJson = JSONObject()
-            folderRecords = mutableListOf()
-            items = emptyList()
-            folders = emptyList()
-            standaloneTotps = emptyList()
+        } else null
+
+        if (isFromOnboarding && resolvedOnboardingPwd == null) {
+            showToast(t("主密码至少 8 位"), true)
+            onResult(false)
+            return
         }
 
-        val active = items.filter { it.deletedAt == null }
-        val existingKeys = active.map { "${it.title}|${it.username.ifEmpty { it.cardNumber }}" }.toSet()
-
-        val incoming = preview.items.mapIndexed { idx, it ->
-            it.copy(
-                id = "imp_${System.currentTimeMillis()}_$idx",
-                folder = normalizeFolderName(it.folder),
-                updatedAt = it.updatedAt.ifEmpty { nowUpdatedAt() },
-                strength = computePasswordStrength(it.password)
-            )
-        }
-
-        val addedCount: Int
-        when (strategy) {
-            ImportStrategy.OVERWRITE -> {
-                items = incoming
-                folderRecords = incoming.map { it.folder }
-                    .filter { it != DEFAULT_FOLDER }
-                    .distinct()
-                    .mapIndexed { idx, name -> FolderRecord("f_${System.currentTimeMillis()}_$idx", name) }
-                    .toMutableList()
-                folders = folderRecords.map { it.name }
-                addedCount = incoming.size
-            }
-            ImportStrategy.SKIP_DUPLICATES -> {
-                val unique = incoming.filter { "${it.title}|${it.username.ifEmpty { it.cardNumber }}" !in existingKeys }
-                items = unique + items
-                unique.map { it.folder }.filter { it != DEFAULT_FOLDER }.distinct().forEach { f ->
-                    if (folderRecords.none { it.name == f }) {
-                        folderRecords.add(FolderRecord("f_${System.currentTimeMillis()}_${folderRecords.size}", f))
-                    }
+        isBusy = true
+        viewModelScope.launch {
+            val kdfRes = withContext(Dispatchers.Default) {
+                runCatching {
+                    if (isFromOnboarding && resolvedOnboardingPwd != null) {
+                        val newSalt = RustCore.generateSalt()
+                        val newKey = RustCore.deriveMasterKey(resolvedOnboardingPwd, newSalt, "argon2id")
+                        newSalt to newKey
+                    } else null
                 }
-                folders = folderRecords.map { it.name }
-                addedCount = unique.size
             }
-            ImportStrategy.MERGE -> {
-                items = incoming + items
-                incoming.map { it.folder }.filter { it != DEFAULT_FOLDER }.distinct().forEach { f ->
-                    if (folderRecords.none { it.name == f }) {
-                        folderRecords.add(FolderRecord("f_${System.currentTimeMillis()}_${folderRecords.size}", f))
-                    }
-                }
-                folders = folderRecords.map { it.name }
-                addedCount = incoming.size
+            kdfRes.onFailure { err ->
+                isBusy = false
+                showToast(err.message ?: t("导入失败"), true)
+                onResult(false)
+                return@launch
             }
-        }
 
-        persistVault(triggerSync = !isFromOnboarding)
-        saveMeta()
-        if (isFromOnboarding) {
-            screen = AppScreen.HOME
-            activeTab = HomeTab.VAULT
+            val derivedPair = kdfRes.getOrNull()
+            if (isFromOnboarding && derivedPair != null) {
+                saltB64 = derivedPair.first
+                masterKeyB64 = derivedPair.second
+                rawRootJson = JSONObject()
+                folderRecords = mutableListOf()
+                items = emptyList()
+                folders = emptyList()
+                standaloneTotps = emptyList()
+            }
+
+            val active = items.filter { it.deletedAt == null }
+            val existingKeys = active.map { "${it.title}|${it.username.ifEmpty { it.cardNumber }}" }.toSet()
+
+            val incoming = preview.items.mapIndexed { idx, it ->
+                it.copy(
+                    id = "imp_${System.currentTimeMillis()}_$idx",
+                    folder = normalizeFolderName(it.folder),
+                    updatedAt = it.updatedAt.ifEmpty { nowUpdatedAt() },
+                    strength = computePasswordStrength(it.password)
+                )
+            }
+
+            val addedCount: Int
+            when (strategy) {
+                ImportStrategy.OVERWRITE -> {
+                    items = incoming
+                    folderRecords = incoming.map { it.folder }
+                        .filter { it != DEFAULT_FOLDER }
+                        .distinct()
+                        .mapIndexed { idx, name -> FolderRecord("f_${System.currentTimeMillis()}_$idx", name) }
+                        .toMutableList()
+                    folders = folderRecords.map { it.name }
+                    addedCount = incoming.size
+                }
+                ImportStrategy.SKIP_DUPLICATES -> {
+                    val unique = incoming.filter { "${it.title}|${it.username.ifEmpty { it.cardNumber }}" !in existingKeys }
+                    items = unique + items
+                    unique.map { it.folder }.filter { it != DEFAULT_FOLDER }.distinct().forEach { f ->
+                        if (folderRecords.none { it.name == f }) {
+                            folderRecords.add(FolderRecord("f_${System.currentTimeMillis()}_${folderRecords.size}", f))
+                        }
+                    }
+                    folders = folderRecords.map { it.name }
+                    addedCount = unique.size
+                }
+                ImportStrategy.MERGE -> {
+                    items = incoming + items
+                    incoming.map { it.folder }.filter { it != DEFAULT_FOLDER }.distinct().forEach { f ->
+                        if (folderRecords.none { it.name == f }) {
+                            folderRecords.add(FolderRecord("f_${System.currentTimeMillis()}_${folderRecords.size}", f))
+                        }
+                    }
+                    folders = folderRecords.map { it.name }
+                    addedCount = incoming.size
+                }
+            }
+
+            withContext(Dispatchers.Default) {
+                persistVaultInternal(markDirty = true)
+            }
+            saveMeta()
+            if (!isFromOnboarding) {
+                scheduleDebouncedUpload()
+            } else {
+                screen = AppScreen.HOME
+                activeTab = HomeTab.VAULT
+            }
+            isBusy = false
+            val msg = if (strategy == ImportStrategy.OVERWRITE) {
+                if (app.suoxia.vault.i18n.AppI18n.isChinese()) "已覆盖导入 $addedCount 条凭证" else "Overwrote with $addedCount items"
+            } else {
+                if (app.suoxia.vault.i18n.AppI18n.isChinese()) "已成功导入 $addedCount 条凭证" else "Imported $addedCount items"
+            }
+            showToast(msg)
+            onResult(true)
         }
-        val msg = if (strategy == ImportStrategy.OVERWRITE) {
-            if (app.suoxia.vault.i18n.AppI18n.isChinese()) "已覆盖导入 $addedCount 条凭证" else "Overwrote with $addedCount items"
-        } else {
-            if (app.suoxia.vault.i18n.AppI18n.isChinese()) "已成功导入 $addedCount 条凭证" else "Imported $addedCount items"
-        }
-        showToast(msg)
     }
 }

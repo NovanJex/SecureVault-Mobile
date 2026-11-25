@@ -46,6 +46,7 @@ fun OnboardingScreen(
             .fillMaxSize()
             .statusBarsPadding()
             .navigationBarsPadding()
+            .imePadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.SpaceBetween,
@@ -378,18 +379,25 @@ fun CreateVaultSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp)
-                    .clickable {
+                    .clickable(enabled = !vm.isBusy) {
                         if (pwd1.length < 8) {
                             vm.showToast(t("主密码至少 8 位"), true)
                         } else if (pwd1 != pwd2) {
                             vm.showToast(t("两次密码输入不一致"), true)
-                        } else if (vm.createFreshVault(pwd1)) {
-                            onDismiss()
+                        } else {
+                            vm.createFreshVault(pwd1) { ok ->
+                                if (ok) onDismiss()
+                            }
                         }
                     }
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Text(t("创建并进入"), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (vm.isBusy) "..." else t("创建并进入"),
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
         }
@@ -425,6 +433,8 @@ fun UnlockScreen(
             .fillMaxSize()
             .statusBarsPadding()
             .navigationBarsPadding()
+            .imePadding()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp, vertical = 32.dp),
         verticalArrangement = Arrangement.SpaceBetween,
         horizontalAlignment = Alignment.CenterHorizontally
@@ -505,14 +515,19 @@ fun UnlockScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp)
-                        .clickable {
-                            if (vm.unlockWithPassword(pwd)) {
-                                pwd = ""
+                        .clickable(enabled = !vm.isBusy) {
+                            vm.unlockWithPassword(pwd) { ok ->
+                                if (ok) pwd = ""
                             }
                         }
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text(t("解锁"), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (vm.isBusy) "..." else t("解锁"),
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
                 if (bioBtnLabel.isNotEmpty()) {

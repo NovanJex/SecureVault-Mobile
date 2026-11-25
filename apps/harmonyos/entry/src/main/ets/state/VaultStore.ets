@@ -1,6 +1,8 @@
+import { promptAction } from '@kit.ArkUI';
 import { fileIo } from '@kit.CoreFileKit';
 import { RustCoreBridge } from '../bridge/RustCoreBridge';
 import { t, tf } from '../i18n/AppI18n';
+import { SecurityService } from '../services/SecurityService';
 import {
   ALL_FOLDER_FILTER,
   AppScreen,
@@ -45,6 +47,7 @@ interface LocalMeta {
   webdavLocalDirty?: boolean;
   webdavSnapshot?: WebDavSnapshot;
   cachedKeyB64: string;
+  wrappedKeyB64?: string;
 }
 
 interface DecryptAttempt {
@@ -141,6 +144,7 @@ export function isValidWebDavUrl(raw: string): boolean {
 @ObservedV2
 export class VaultStore {
   @Trace screen: AppScreen = 'onboarding';
+  @Trace hasVault: boolean = false;
   @Trace activeTab: HomeTab = 'vault';
   @Trace items: VaultItem[] = [];
   @Trace folders: string[] = [];
@@ -173,13 +177,14 @@ export class VaultStore {
   // Generator history (max 6)
   @Trace genHistory: string[] = [];
 
-  // Toast HUD
+  // Toast HUD (legacy fields kept inactive; native promptAction.showToast is used)
   @Trace toastMsg: string = '';
   @Trace toastIsWarn: boolean = false;
   @Trace toastVisible: boolean = false;
 
   private dataDir: string = '';
   private masterKeyB64: string = '';
+  private wrappedKeyB64: string = '';
   private saltB64: string = '';
   private kdfType: KdfType = 'argon2id';
   private folderRecords: VaultFolder[] = [];
@@ -187,7 +192,6 @@ export class VaultStore {
   private webdavLocalDirty: boolean = false;
   private webdavSnapshot: WebDavSnapshot = { etag: '', lastModified: '', size: 0 };
   private syncDebounceTimer: number = -1;
-  private toastTimer: number = -1;
 
   // Pending remote download when salt differs or onboarding restore
   private pendingRemoteContent: string = '';
@@ -198,10 +202,13 @@ export class VaultStore {
     this.dataDir = filesDir;
     const meta = this.readMeta();
     if (!meta || !meta.hasVault) {
+      this.hasVault = false;
       this.screen = 'onboarding';
       return;
     }
     this.saltB64 = meta.saltB64;
+    this.hasVault = this.saltB64.length > 0;
+    this.wrappedKeyB64 = meta.wrappedKeyB64 ?? '';
     this.kdfType = meta.kdfType ?? 'argon2id';
     this.requireUnlock = meta.requireUnlock;
     this.bioFaceOn = meta.bioFaceOn;
@@ -229,6 +236,7 @@ export class VaultStore {
         this.screen = 'home';
         this.onVaultUnlocked();
       } catch (_) {
+        this.masterKeyB64 = '';
         this.screen = 'unlock';
       }
     } else {
@@ -277,8 +285,9 @@ export class VaultStore {
     if (this.dataDir.length === 0) {
       return;
     }
+    this.hasVault = this.saltB64.length > 0;
     const meta: LocalMeta = {
-      hasVault: this.saltB64.length > 0,
+      hasVault: this.hasVault,
       saltB64: this.saltB64,
       kdfType: this.kdfType,
       requireUnlock: this.requireUnlock,
@@ -297,6 +306,7 @@ export class VaultStore {
       webdavLocalDirty: this.webdavLocalDirty,
       webdavSnapshot: this.webdavSnapshot,
       cachedKeyB64: this.requireUnlock ? '' : this.masterKeyB64,
+      wrappedKeyB64: this.wrappedKeyB64,
     };
     const file = fileIo.openSync(
       this.metaPath(),
@@ -304,6 +314,47 @@ export class VaultStore {
     );
     fileIo.writeSync(file.fd, JSON.stringify(meta));
     fileIo.closeSync(file);
+  }
+
+  private async persistWrappedMasterKey(): Promise<void> {
+    if (this.masterKeyB64.length === 0) {
+      return;
+    }
+    const wrapped = await SecurityService.wrapKeyWithHuks(this.masterKeyB64);
+    if (wrapped.length > 0) {
+      this.wrappedKeyB64 = wrapped;
+    }
+    this.saveMeta();
+  }
+
+  private async unwrapAndLoadForQuickUnlock(): Promise<boolean> {
+    if (this.masterKeyB64.length === 0) {
+      const meta = this.readMeta();
+      const wrapped = this.wrappedKeyB64.length > 0
+        ? this.wrappedKeyB64
+        : (meta?.wrappedKeyB64 ?? '');
+      if (wrapped.length > 0) {
+        const unwrapped = await SecurityService.unwrapKeyWithHuks(wrapped);
+        if (unwrapped.length > 0) {
+          this.masterKeyB64 = unwrapped;
+        }
+      }
+      if (this.masterKeyB64.length === 0 && meta && meta.cachedKeyB64.length > 0) {
+        this.masterKeyB64 = meta.cachedKeyB64;
+      }
+      if (this.masterKeyB64.length === 0) {
+        this.showToast(t('请先使用主密码解锁一次以激活快捷解锁'), true);
+        return false;
+      }
+      try {
+        this.loadAndDecryptVault();
+      } catch (_) {
+        this.masterKeyB64 = '';
+        this.showToast(t('快捷解锁密钥已失效，请使用主密码解锁'), true);
+        return false;
+      }
+    }
+    return this.masterKeyB64.length > 0;
   }
 
   private parseVaultFileContent(raw: string): ParsedVaultFile {
@@ -323,33 +374,34 @@ export class VaultStore {
     };
   }
 
-  private tryDeriveAndDecrypt(
+  private async tryDeriveAndDecryptAsync(
     password: string,
     saltB64: string,
     cipher: string,
     preferredKdf?: KdfType
-  ): DecryptAttempt {
+  ): Promise<DecryptAttempt> {
     const first: KdfType = preferredKdf ?? 'argon2id';
     const second: KdfType = first === 'argon2id' ? 'pbkdf2' : 'argon2id';
     try {
-      const k1 = RustCoreBridge.deriveMasterKey(password, saltB64, first);
+      const k1 = await RustCoreBridge.deriveMasterKeyAsync(password, saltB64, first);
       const p1 = RustCoreBridge.decryptVault(cipher, k1);
       return { keyB64: k1, plain: p1, kdf: first };
     } catch (_) {
-      const k2 = RustCoreBridge.deriveMasterKey(password, saltB64, second);
+      const k2 = await RustCoreBridge.deriveMasterKeyAsync(password, saltB64, second);
       const p2 = RustCoreBridge.decryptVault(cipher, k2);
       return { keyB64: k2, plain: p2, kdf: second };
     }
   }
 
-  createFreshVault(masterPassword: string): boolean {
+  async createFreshVault(masterPassword: string): Promise<boolean> {
     if (masterPassword.length < 8) {
       this.showToast(t('主密码至少 8 位'), true);
       return false;
     }
     this.saltB64 = RustCoreBridge.generateSalt();
     this.kdfType = 'argon2id';
-    this.masterKeyB64 = RustCoreBridge.deriveMasterKey(masterPassword, this.saltB64, 'argon2id');
+    this.masterKeyB64 = await RustCoreBridge.deriveMasterKeyAsync(masterPassword, this.saltB64, 'argon2id');
+    this.hasVault = true;
     this.items = [];
     this.folderRecords = [];
     this.folders = [];
@@ -357,46 +409,47 @@ export class VaultStore {
     this.extraPayloadFields = {};
     this.activeFolder = ALL_FOLDER_FILTER;
     this.persistVault(false);
-    this.saveMeta();
+    await this.persistWrappedMasterKey();
     this.screen = 'home';
     this.activeTab = 'vault';
     this.showToast(t('已创建新保险箱'));
     return true;
   }
 
-  verifyMasterPassword(password: string): boolean {
+  async verifyMasterPassword(password: string): Promise<boolean> {
     if (password.length === 0 || this.saltB64.length === 0) {
       return false;
     }
     try {
       const raw = RustCoreBridge.loadVaultFile(this.dataDir);
       if (raw.trim().length === 0) {
-        const k = RustCoreBridge.deriveMasterKey(password, this.saltB64, this.kdfType);
+        const k = await RustCoreBridge.deriveMasterKeyAsync(password, this.saltB64, this.kdfType);
         return k === this.masterKeyB64;
       }
       const parsed = this.parseVaultFileContent(raw);
       const saltToUse = parsed.salt.length > 0 ? parsed.salt : this.saltB64;
-      this.tryDeriveAndDecrypt(password, saltToUse, parsed.cipher, this.kdfType);
+      await this.tryDeriveAndDecryptAsync(password, saltToUse, parsed.cipher, this.kdfType);
       return true;
     } catch (_) {
       return false;
     }
   }
 
-  unlockWithPassword(masterPassword: string): boolean {
+  async unlockWithPassword(masterPassword: string): Promise<boolean> {
     try {
       const raw = RustCoreBridge.loadVaultFile(this.dataDir);
       const parsed = this.parseVaultFileContent(raw);
       const saltToUse = parsed.salt.length > 0 ? parsed.salt : this.saltB64;
-      const attempt = this.tryDeriveAndDecrypt(masterPassword, saltToUse, parsed.cipher, this.kdfType);
+      const attempt = await this.tryDeriveAndDecryptAsync(masterPassword, saltToUse, parsed.cipher, this.kdfType);
       this.saltB64 = saltToUse;
       this.masterKeyB64 = attempt.keyB64;
       this.kdfType = attempt.kdf;
+      this.hasVault = true;
       this.applyDecryptedPayloadJson(attempt.plain);
       if (parsed.isLegacy) {
         this.persistVault(false);
       }
-      this.saveMeta();
+      await this.persistWrappedMasterKey();
       this.screen = 'home';
       this.showToast(t('锁匣已解锁'));
       this.onVaultUnlocked();
@@ -407,43 +460,35 @@ export class VaultStore {
     }
   }
 
-  unlockWithBiometricSuccess(): void {
-    const meta = this.readMeta();
-    if (this.masterKeyB64.length === 0 && meta && meta.cachedKeyB64.length > 0) {
-      this.masterKeyB64 = meta.cachedKeyB64;
-      try {
-        this.loadAndDecryptVault();
-      } catch (_) {
-        // Keep current in-memory items if already loaded
-      }
+  async unlockWithBiometricSuccess(): Promise<boolean> {
+    const ready = await this.unwrapAndLoadForQuickUnlock();
+    if (!ready) {
+      return false;
     }
     this.screen = 'home';
     this.showToast(t('锁匣已解锁'));
     this.onVaultUnlocked();
+    return true;
   }
 
-  unlockWithGesture(pattern: string): boolean {
-    if (pattern === this.gesturePattern && this.gesturePattern.length >= 4) {
-      const meta = this.readMeta();
-      if (this.masterKeyB64.length === 0 && meta && meta.cachedKeyB64.length > 0) {
-        this.masterKeyB64 = meta.cachedKeyB64;
-        try {
-          this.loadAndDecryptVault();
-        } catch (_) {
-          // Keep in-memory state if already loaded
-        }
-      }
-      this.screen = 'home';
-      this.showToast(t('手势验证通过'));
-      this.onVaultUnlocked();
-      return true;
+  async unlockWithGesture(pattern: string): Promise<boolean> {
+    if (pattern !== this.gesturePattern || this.gesturePattern.length < 4) {
+      this.showToast(t('手势图案错误'), true);
+      return false;
     }
-    this.showToast(t('手势图案错误'), true);
-    return false;
+    const ready = await this.unwrapAndLoadForQuickUnlock();
+    if (!ready) {
+      return false;
+    }
+    this.screen = 'home';
+    this.showToast(t('手势验证通过'));
+    this.onVaultUnlocked();
+    return true;
   }
 
-  changeMasterPassword(oldPwd: string, newPwd: string): boolean {
-    if (!this.verifyMasterPassword(oldPwd)) {
+  async changeMasterPassword(oldPwd: string, newPwd: string): Promise<boolean> {
+    const valid = await this.verifyMasterPassword(oldPwd);
+    if (!valid) {
       this.showToast(t('当前主密码不正确'), true);
       return false;
     }
@@ -466,7 +511,7 @@ export class VaultStore {
     }
 
     const newSalt = RustCoreBridge.generateSalt();
-    const newKey = RustCoreBridge.deriveMasterKey(newPwd, newSalt, 'argon2id');
+    const newKey = await RustCoreBridge.deriveMasterKeyAsync(newPwd, newSalt, 'argon2id');
     this.saltB64 = newSalt;
     this.masterKeyB64 = newKey;
     this.kdfType = 'argon2id';
@@ -481,7 +526,7 @@ export class VaultStore {
     }
 
     this.persistVault(true);
-    this.saveMeta();
+    await this.persistWrappedMasterKey();
     this.showToast(t('主密码已更新'));
     return true;
   }
@@ -609,6 +654,18 @@ export class VaultStore {
     }
     if (item.passwordHistory && item.passwordHistory.length > 0) {
       out['passwordHistory'] = item.passwordHistory as Object;
+    }
+    if (item.expiresAt && item.expiresAt.length > 0) {
+      out['expiresAt'] = item.expiresAt;
+    }
+    if (item.customFields && Object.keys(item.customFields).length > 0) {
+      out['customFields'] = item.customFields as Object;
+    }
+    if (item.lastUsedAt && item.lastUsedAt.length > 0) {
+      out['lastUsedAt'] = item.lastUsedAt;
+    }
+    if (item.ignoreSecurityWarning === true) {
+      out['ignoreSecurityWarning'] = true;
     }
     if (item.deletedAt && item.deletedAt.length > 0) {
       out['deletedAt'] = item.deletedAt;
@@ -1263,7 +1320,7 @@ export class VaultStore {
     }
   }
 
-  submitRemoteMasterPassword(password: string): boolean {
+  async submitRemoteMasterPassword(password: string): Promise<boolean> {
     if (password.length === 0) {
       this.showToast(t('请输入当前主密码'), true);
       return false;
@@ -1271,10 +1328,11 @@ export class VaultStore {
     try {
       const parsed = this.parseVaultFileContent(this.pendingRemoteContent);
       const saltToUse = parsed.salt.length > 0 ? parsed.salt : this.saltB64;
-      const attempt = this.tryDeriveAndDecrypt(password, saltToUse, parsed.cipher, 'argon2id');
+      const attempt = await this.tryDeriveAndDecryptAsync(password, saltToUse, parsed.cipher, 'argon2id');
       this.saltB64 = saltToUse;
       this.masterKeyB64 = attempt.keyB64;
       this.kdfType = attempt.kdf;
+      this.hasVault = true;
       this.applyDecryptedPayloadJson(attempt.plain);
       RustCoreBridge.saveVaultFile(this.dataDir, `${saltToUse}:${parsed.cipher}`);
       if (this.pendingRemoteStat) {
@@ -1294,7 +1352,7 @@ export class VaultStore {
       this.pendingRemoteContent = '';
       this.pendingRemoteStat = null;
       this.showRemotePwdPrompt = false;
-      this.saveMeta();
+      await this.persistWrappedMasterKey();
       if (this.screen !== 'home') {
         this.screen = 'home';
         this.activeTab = 'vault';
@@ -1315,11 +1373,11 @@ export class VaultStore {
   }
 
   // ---- Import & Export ----
-  parseImportFile(
+  async parseImportFile(
     source: ImportSourceKey,
     tempPath: string,
     password: string
-  ): ImportParseResult {
+  ): Promise<ImportParseResult> {
     if (source === 'kdbx') {
       if (password.length === 0) {
         return {
@@ -1330,7 +1388,7 @@ export class VaultStore {
           badge: 'KeePass (.kdbx)',
         };
       }
-      const rawJson = RustCoreBridge.importKdbx(tempPath, password);
+      const rawJson = await RustCoreBridge.importKdbxAsync(tempPath, password);
       const parsed = JSON.parse(rawJson) as Record<string, Object>;
       const rawItems = parsed['items'] as Array<Object>;
       const items: VaultItem[] = [];
@@ -1406,7 +1464,7 @@ export class VaultStore {
         const salt = asStr(obj, 'salt');
         const encPayload = asStr(obj, 'encryptedPayload');
         const kdfHint = asStr(obj, 'kdf') === 'pbkdf2' ? 'pbkdf2' : 'argon2id';
-        const attempt = this.tryDeriveAndDecrypt(password, salt, encPayload, kdfHint);
+        const attempt = await this.tryDeriveAndDecryptAsync(password, salt, encPayload, kdfHint);
         const expectedSum = asStr(obj, 'checksum');
         if (expectedSum.length > 0) {
           const actualSum = RustCoreBridge.computeSha256(attempt.plain);
@@ -1563,19 +1621,27 @@ export class VaultStore {
     };
   }
 
-  executeImport(
+  async executeImport(
     incoming: VaultItem[],
     strategy: ImportStrategy,
     onboardingMasterPwd?: string
-  ): number {
-    // If importing during onboarding, create vault first if needed
+  ): Promise<number> {
+    // If importing during onboarding, require a user-provided >= 8-char master password (no hardcoded fallback)
+    let createdNewVault = false;
     if (this.masterKeyB64.length === 0) {
-      const pwd = onboardingMasterPwd && onboardingMasterPwd.length >= 8
-        ? onboardingMasterPwd
-        : 'SecureVault#2026';
+      if (!onboardingMasterPwd || onboardingMasterPwd.length < 8) {
+        this.showToast(t('主密码至少 8 位'), true);
+        return -1;
+      }
       this.saltB64 = RustCoreBridge.generateSalt();
       this.kdfType = 'argon2id';
-      this.masterKeyB64 = RustCoreBridge.deriveMasterKey(pwd, this.saltB64, 'argon2id');
+      this.masterKeyB64 = await RustCoreBridge.deriveMasterKeyAsync(
+        onboardingMasterPwd,
+        this.saltB64,
+        'argon2id'
+      );
+      this.hasVault = true;
+      createdNewVault = true;
     }
 
     const active = this.items.filter((i: VaultItem) => !i.deletedAt);
@@ -1629,7 +1695,11 @@ export class VaultStore {
     this.folders = this.folderRecords.map((f: VaultFolder) => f.name);
 
     this.persistVault();
-    this.saveMeta();
+    if (createdNewVault) {
+      await this.persistWrappedMasterKey();
+    } else {
+      this.saveMeta();
+    }
     if (this.screen !== 'home') {
       this.screen = 'home';
       this.activeTab = 'vault';
@@ -1669,26 +1739,28 @@ export class VaultStore {
     RustCoreBridge.writeExportFile(tempPath, JSON.stringify(envelope, null, 2));
   }
 
-  exportKdbxToTemp(tempPath: string, password: string): void {
+  async exportKdbxToTemp(tempPath: string, password: string): Promise<void> {
     const serializedItems: Array<Record<string, Object>> = [];
     for (let i = 0; i < this.items.length; i++) {
       serializedItems.push(this.serializeItemToRecord(this.items[i]));
     }
     const itemsJson = JSON.stringify({ 'items': serializedItems });
-    RustCoreBridge.exportKdbx(tempPath, itemsJson, password);
+    await RustCoreBridge.exportKdbxAsync(tempPath, itemsJson, password);
   }
 
-  // ---- Toast ----
+  // ---- Toast (System Top-Layer Overlay, always visible above bindSheet) ----
   showToast(msg: string, isWarn: boolean = false): void {
     this.toastMsg = msg;
     this.toastIsWarn = isWarn;
-    this.toastVisible = true;
-    if (this.toastTimer >= 0) {
-      clearTimeout(this.toastTimer);
+    this.toastVisible = false;
+    try {
+      promptAction.showToast({
+        message: `${isWarn ? '! ' : '✓ '}${msg}`,
+        duration: 2200,
+      });
+    } catch (_) {
+      // Ignore if UI context is not ready yet
     }
-    this.toastTimer = setTimeout(() => {
-      this.toastVisible = false;
-    }, 2400);
   }
 }
 

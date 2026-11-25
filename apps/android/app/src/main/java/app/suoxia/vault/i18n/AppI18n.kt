@@ -77,6 +77,10 @@ object AppI18n {
         "本地数据已加密保护" to "Local data is encrypted",
         "锁匣已解锁" to "Vault unlocked",
         "主密码不正确" to "Incorrect master password",
+        "无法恢复密钥，请使用主密码解锁" to "Unable to restore key, please unlock with master password",
+        "密钥解密失败，请使用主密码解锁" to "Key decryption failed, please unlock with master password",
+        "验证身份以解锁锁匣" to "Verify identity to unlock SecureVault",
+        "优先使用面容或指纹识别" to "Prefer Face or Fingerprint unlock",
         "手势验证通过" to "Pattern verified",
         "手势图案错误，请重试" to "Incorrect pattern, try again",
         "生物识别验证通过" to "Biometrics verified",
@@ -138,6 +142,11 @@ object AppI18n {
         "当前筛选下暂无凭证" to "No matching items",
         "复制账号" to "Copy Username",
         "复制密码" to "Copy Password",
+        "复制卡号" to "Copy Card Number",
+        "复制内容" to "Copy Content",
+        "复制手机号" to "Copy Phone",
+        "复制邮箱" to "Copy Email",
+        "复制姓名" to "Copy Name",
         "加星标" to "Star",
         "取消星标" to "Unstar",
         "设为星标" to "Star",
@@ -261,6 +270,7 @@ object AppI18n {
         "扫描两步验证二维码" to "Scan 2FA QR Code",
         "关闭相机" to "Close Camera",
         "已识别并填入验证密钥" to "2FA secret scanned",
+        "无法启动相机，请检查相机权限或设备状态" to "Unable to start camera, check permission or device",
 
         // Generator Tab
         "随机密码" to "Random",
@@ -320,6 +330,7 @@ object AppI18n {
         "导出为 KeePass (.kdbx)" to "Export as KeePass (.kdbx)",
         "设置 KeePass 导出密码" to "Set KeePass File Password",
         "输入用于加密 .kdbx 文件的密码" to "Enter password to encrypt the .kdbx file",
+        "请输入导出密码" to "Please enter an export password",
         "通用" to "General",
         "外观模式" to "Appearance",
         "浅色" to "Light",
@@ -403,6 +414,8 @@ object AppI18n {
         "谨慎" to "Caution",
         "确认覆盖当前保险箱？" to "Overwrite Current Vault?",
         "确认覆盖" to "Overwrite",
+        "设置本机主密码" to "Set Local Master Password",
+        "该备份未包含主密码，请为本机保险箱设置主密码（至少 8 位）。" to "This backup has no master password. Set one for your local vault (min 8 chars).",
 
         // About
         "本地加密密码管理器 · 手机与电脑加密同步" to "Local encrypted password manager · Sync across phone & desktop",

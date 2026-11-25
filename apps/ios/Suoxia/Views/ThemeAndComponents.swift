@@ -464,4 +464,37 @@ extension View {
             }
         }
     }
+
+    func svToastOverlay(store: VaultStore, bottomPadding: CGFloat = 24) -> some View {
+        self.modifier(SvToastOverlayModifier(store: store, bottomPadding: bottomPadding))
+    }
+}
+
+private struct SvToastOverlayModifier: ViewModifier {
+    @ObservedObject var store: VaultStore
+    let bottomPadding: CGFloat
+
+    func body(content: Content) -> some View {
+        ZStack(alignment: .bottom) {
+            content
+
+            if let msg = store.toastMsg {
+                HStack(spacing: 8) {
+                    Image(systemName: store.toastWarn ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+                        .foregroundColor(store.toastWarn ? .yellow : Color(red: 52 / 255, green: 211 / 255, blue: 153 / 255))
+                    Text(msg)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.white)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(Color.black.opacity(0.9))
+                .clipShape(Capsule())
+                .shadow(color: Color.black.opacity(0.25), radius: 10, y: 4)
+                .padding(.bottom, bottomPadding)
+                .allowsHitTesting(false)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+        }
+    }
 }

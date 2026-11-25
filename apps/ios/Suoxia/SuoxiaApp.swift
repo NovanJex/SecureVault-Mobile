@@ -44,32 +44,17 @@ struct RootContainerView: View {
                 }
                 .transition(.opacity)
             }
-
-            // Toast HUD
-            if let msg = store.toastMsg {
-                HStack(spacing: 8) {
-                    Image(systemName: store.toastWarn ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
-                        .foregroundColor(store.toastWarn ? .yellow : Color(red: 52 / 255, green: 211 / 255, blue: 153 / 255))
-                    Text(msg)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.white)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(Color.black.opacity(0.9))
-                .clipShape(Capsule())
-                .shadow(color: Color.black.opacity(0.25), radius: 10, y: 4)
-                .padding(.bottom, 78)
-                .allowsHitTesting(false)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
         }
+        .svToastOverlay(store: store, bottomPadding: 78)
         .onChange(of: scenePhase) { newPhase in
             store.handleScenePhaseChange(newPhase)
         }
         .confirmationDialog(
             t("发现同步冲突"),
-            isPresented: $store.showWebdavConflictSheet,
+            isPresented: Binding(
+                get: { !store.isWebDavSheetOpen && store.showWebdavConflictSheet },
+                set: { if !$0 { store.showWebdavConflictSheet = false } }
+            ),
             titleVisibility: .visible
         ) {
             Button(t("用本机覆盖云端")) {
@@ -82,7 +67,12 @@ struct RootContainerView: View {
         } message: {
             Text(t("本机与云端的备份数据均有更新，请选择保留哪一份："))
         }
-        .sheet(isPresented: $store.showRemotePasswordPrompt) {
+        .sheet(
+            isPresented: Binding(
+                get: { !store.isWebDavSheetOpen && store.showRemotePasswordPrompt },
+                set: { if !$0 { store.cancelRemotePasswordPrompt() } }
+            )
+        ) {
             RemotePasswordPromptSheet(store: store)
                 .svSheetPresentation(.compact(270))
                 .interactiveDismissDisabled(true)

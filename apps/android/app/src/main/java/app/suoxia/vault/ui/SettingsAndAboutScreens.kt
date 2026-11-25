@@ -2,6 +2,7 @@ package app.suoxia.vault.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -402,18 +403,27 @@ fun VerifyPasswordSheet(
             Surface(
                 shape = RoundedCornerShape(12.dp),
                 color = SvIndigo,
-                modifier = Modifier.weight(1f).height(44.dp).clickable {
+                modifier = Modifier.weight(1f).height(44.dp).clickable(enabled = !vm.isBusy) {
                     if (pwd.isEmpty()) {
                         vm.showToast(t("输入当前主密码"), true)
-                    } else if (vm.verifyMasterPassword(pwd)) {
-                        onVerified()
                     } else {
-                        vm.showToast(t("主密码不正确"), true)
+                        vm.verifyMasterPassword(pwd) { ok ->
+                            if (ok) {
+                                onVerified()
+                            } else {
+                                vm.showToast(t("主密码不正确"), true)
+                            }
+                        }
                     }
                 }
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Text(t("确认开启"), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                    Text(
+                        if (vm.isBusy) "..." else t("确认开启"),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White
+                    )
                 }
             }
         }
@@ -459,14 +469,19 @@ fun ChangeMasterPwdSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp)
-                    .clickable {
+                    .clickable(enabled = !vm.isBusy) {
                         vm.changeMasterPassword(oldPwd, newPwd, confirmPwd) {
                             onDismiss()
                         }
                     }
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Text(t("确认修改"), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (vm.isBusy) "..." else t("确认修改"),
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
         }
@@ -500,6 +515,10 @@ fun AboutSheet(
             if (subPage != null) subPage = null else onDismiss()
         }
     ) {
+        BackHandler(enabled = subPage != null) {
+            subPage = null
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()

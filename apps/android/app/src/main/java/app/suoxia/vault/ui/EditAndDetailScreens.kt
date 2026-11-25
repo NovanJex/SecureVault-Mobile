@@ -50,8 +50,6 @@ fun DetailPage(
     onBack: () -> Unit,
     onEdit: (VaultItem) -> Unit
 ) {
-    BackHandler { onBack() }
-
     val ctx = LocalContext.current
     val item = vm.items.firstOrNull { it.id == itemId }
     if (item == null) {
@@ -63,6 +61,14 @@ fun DetailPage(
     var showMoreSheet by remember { mutableStateOf(false) }
     var showTrashConfirm by remember { mutableStateOf(false) }
     var largeTypePwd by remember { mutableStateOf<String?>(null) }
+
+    BackHandler {
+        if (largeTypePwd != null) {
+            largeTypePwd = null
+        } else {
+            onBack()
+        }
+    }
 
     var tick by remember { mutableIntStateOf(0) }
     LaunchedEffect(item.otpSecret) {
@@ -366,7 +372,12 @@ fun DetailPage(
                                         border = BorderStroke(1.dp, p.border),
                                         modifier = Modifier.clickable {
                                             runCatching {
-                                                val targetUrl = if (item.url.startsWith("http")) item.url else "https://${item.url}"
+                                                val trimmedUrl = item.url.trim()
+                                                val targetUrl = if (trimmedUrl.startsWith("http://", ignoreCase = true) || trimmedUrl.startsWith("https://", ignoreCase = true)) {
+                                                    trimmedUrl
+                                                } else {
+                                                    "https://$trimmedUrl"
+                                                }
                                                 ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)))
                                             }
                                         }
