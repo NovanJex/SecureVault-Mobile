@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Folder
@@ -82,13 +83,23 @@ fun DetailPage(
                     .height(48.dp)
                     .padding(horizontal = 16.dp)
             ) {
-                Text(
-                    t("‹ 返回"),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = SvIndigo,
-                    modifier = Modifier.align(Alignment.CenterStart).clickable { onBack() }.padding(vertical = 8.dp)
-                )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(p.subBg)
+                        .border(0.8.dp, p.border, CircleShape)
+                        .clickable { onBack() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Filled.ChevronLeft,
+                        contentDescription = t("返回"),
+                        tint = p.fg.copy(alpha = 0.8f),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
                 Text(
                     item.title,
                     fontSize = 14.sp,

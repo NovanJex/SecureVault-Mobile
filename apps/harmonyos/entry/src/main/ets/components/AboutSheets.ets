@@ -78,17 +78,33 @@ export struct AboutSheet {
     Column() {
       // Header
       Row() {
-        Text(this.subPage === 'main' ? t('关闭') : t('‹ 返回'))
-          .fontSize(14)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(this.p().brand)
-          .onClick(() => {
-            if (this.subPage === 'main') {
+        if (this.subPage === 'main') {
+          Text(t('关闭'))
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.p().fgMain)
+            .opacity(0.6)
+            .onClick(() => {
               this.onClose();
-            } else {
-              this.subPage = 'main';
-            }
+            })
+        } else {
+          Row() {
+            SymbolGlyph($r('sys.symbol.chevron_left'))
+              .fontSize(16)
+              .fontColor([this.p().fgMain])
+              .opacity(0.8)
+          }
+          .width(32)
+          .height(32)
+          .borderRadius(16)
+          .backgroundColor(this.p().subBg)
+          .border({ width: 0.8, color: this.p().border })
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .onClick(() => {
+            this.subPage = 'main';
           })
+        }
         Text(this.headerTitle())
           .fontSize(15)
           .fontWeight(FontWeight.Bold)

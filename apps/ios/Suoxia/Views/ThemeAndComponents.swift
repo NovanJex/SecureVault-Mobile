@@ -72,10 +72,22 @@ struct SheetTopHeader<Trailing: View>: View {
                     .lineLimit(1)
                 HStack {
                     Button(action: onLeft) {
-                        Text(leftTitle)
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(AppTheme.brand)
+                        if leftTitle.hasPrefix("‹ ") {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.primary.opacity(0.8))
+                                .frame(width: 32, height: 32)
+                                .background(AppTheme.subtleBackground(isDark))
+                                .clipShape(Circle())
+                                .overlay(Circle().stroke(AppTheme.borderColor(isDark), lineWidth: 0.8))
+                                .accessibilityLabel(String(leftTitle.dropFirst(2)))
+                        } else {
+                            Text(leftTitle)
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundColor(.primary.opacity(0.6))
+                        }
                     }
+                    .buttonStyle(.plain)
                     Spacer()
                     trailing()
                 }

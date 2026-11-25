@@ -80,7 +80,8 @@ export struct WebDavSheet {
         Text(t('关闭'))
           .fontSize(14)
           .fontWeight(FontWeight.Medium)
-          .fontColor(this.p().brand)
+          .fontColor(this.p().fgMain)
+          .opacity(0.6)
           .onClick(() => {
             this.onClose();
           })
@@ -666,21 +667,33 @@ export struct ImportFlowSheet {
     Column() {
       // Header
       Row() {
-        Text(
-          this.step === 'pick'
-            ? t('关闭')
-            : (this.step === 'decrypt' ? t('‹ 上一步') : t('‹ 重新选择'))
-        )
-          .fontSize(14)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(this.p().brand)
-          .onClick(() => {
-            if (this.step === 'pick') {
+        if (this.step === 'pick') {
+          Text(t('关闭'))
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.p().fgMain)
+            .opacity(0.6)
+            .onClick(() => {
               this.onClose();
-            } else {
-              this.step = 'pick';
-            }
+            })
+        } else {
+          Row() {
+            SymbolGlyph($r('sys.symbol.chevron_left'))
+              .fontSize(16)
+              .fontColor([this.p().fgMain])
+              .opacity(0.8)
+          }
+          .width(32)
+          .height(32)
+          .borderRadius(16)
+          .backgroundColor(this.p().subBg)
+          .border({ width: 0.8, color: this.p().border })
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .onClick(() => {
+            this.step = 'pick';
           })
+        }
         Text(
           this.step === 'pick'
             ? t('导入凭证')
@@ -1028,7 +1041,8 @@ export struct ChangeMasterPwdSheet {
         Text(t('取消'))
           .fontSize(14)
           .fontWeight(FontWeight.Medium)
-          .fontColor(this.p().brand)
+          .fontColor(this.p().fgMain)
+          .opacity(0.6)
           .onClick(() => {
             this.onClose();
           })

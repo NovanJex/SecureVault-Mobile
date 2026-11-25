@@ -387,13 +387,32 @@ fun SvPageSheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = leftLabel,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = SvIndigo,
-                    modifier = Modifier.clickable { onLeftClick() }.padding(vertical = 6.dp)
-                )
+                if (leftLabel.startsWith("‹ ")) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(p.subBg)
+                            .border(0.8.dp, p.border, CircleShape)
+                            .clickable { onLeftClick() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Filled.ChevronLeft,
+                            contentDescription = leftLabel.removePrefix("‹ "),
+                            tint = p.fg.copy(alpha = 0.8f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                } else {
+                    Text(
+                        text = leftLabel,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = p.fg.copy(alpha = 0.6f),
+                        modifier = Modifier.clickable { onLeftClick() }.padding(vertical = 6.dp)
+                    )
+                }
                 Text(
                     text = title,
                     fontSize = 14.sp,

@@ -194,7 +194,8 @@ export struct CreateVaultSheet {
         Text(t('取消'))
           .fontSize(14)
           .fontWeight(FontWeight.Medium)
-          .fontColor(this.p().brand)
+          .fontColor(this.p().fgMain)
+          .opacity(0.6)
           .onClick(() => {
             this.onClose();
           })
@@ -552,7 +553,8 @@ export struct GestureSetupSheet {
         Text(t('取消'))
           .fontSize(14)
           .fontWeight(FontWeight.Medium)
-          .fontColor(this.p().brand)
+          .fontColor(this.p().fgMain)
+          .opacity(0.6)
           .onClick(() => {
             this.onClose();
           })

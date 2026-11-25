@@ -202,13 +202,22 @@ export struct DetailView {
     Column() {
       // Top Nav Bar
       Row() {
-        Text(t('‹ 返回'))
-          .fontSize(14)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(this.p().brand)
-          .onClick(() => {
-            this.onBack();
-          })
+        Row() {
+          SymbolGlyph($r('sys.symbol.chevron_left'))
+            .fontSize(16)
+            .fontColor([this.p().fgMain])
+            .opacity(0.8)
+        }
+        .width(32)
+        .height(32)
+        .borderRadius(16)
+        .backgroundColor(this.p().subBg)
+        .border({ width: 0.8, color: this.p().border })
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .onClick(() => {
+          this.onBack();
+        })
 
         Text(item.title)
           .fontSize(15)
@@ -933,7 +942,8 @@ export struct EditCredentialSheet {
         Text(t('取消'))
           .fontSize(14)
           .fontWeight(FontWeight.Medium)
-          .fontColor(this.p().brand)
+          .fontColor(this.p().fgMain)
+          .opacity(0.6)
           .onClick(() => {
             this.onClose();
           })
@@ -1303,7 +1313,8 @@ export struct FolderManagerSheet {
         Text(t('关闭'))
           .fontSize(14)
           .fontWeight(FontWeight.Medium)
-          .fontColor(this.p().brand)
+          .fontColor(this.p().fgMain)
+          .opacity(0.6)
           .onClick(() => {
             this.onClose();
           })
@@ -1482,7 +1493,8 @@ export struct TrashSheet {
         Text(t('关闭'))
           .fontSize(14)
           .fontWeight(FontWeight.Medium)
-          .fontColor(this.p().brand)
+          .fontColor(this.p().fgMain)
+          .opacity(0.6)
           .onClick(() => {
             this.onClose();
           })
@@ -1619,7 +1631,8 @@ export struct AddTotpSheet {
         Text(t('取消'))
           .fontSize(14)
           .fontWeight(FontWeight.Medium)
-          .fontColor(this.p().brand)
+          .fontColor(this.p().fgMain)
+          .opacity(0.6)
           .onClick(() => {
             this.onClose();
           })
