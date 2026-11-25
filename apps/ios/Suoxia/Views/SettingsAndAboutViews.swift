@@ -975,7 +975,7 @@ private struct KdbxExportPasswordSheet: View {
                         .foregroundColor(.primary)
                         .frame(maxWidth: .infinity)
                         .frame(height: 44)
-                        .background(AppTheme.subBackground(isDark))
+                        .background(AppTheme.subtleBackground(isDark))
                         .cornerRadius(12)
                 }
                 .buttonStyle(.plain)
