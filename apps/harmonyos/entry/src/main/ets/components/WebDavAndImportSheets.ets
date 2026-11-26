@@ -316,10 +316,10 @@ export struct WebDavSheet {
                 .onChange((v: string) => {
                   this.wdPass = v;
                 })
-              Text(this.showPass ? t('隐藏') : t('显示'))
-                .fontSize(11)
-                .fontColor(this.p().fgMain)
-                .opacity(0.55)
+              SymbolGlyph(this.showPass ? $r('sys.symbol.eye_slash') : $r('sys.symbol.eye'))
+                .fontSize(17)
+                .fontColor([this.p().fgMain])
+                .opacity(0.5)
                 .padding({ left: 6, right: 4 })
                 .onClick(() => {
                   this.showPass = !this.showPass;
@@ -880,10 +880,10 @@ export struct ImportFlowSheet {
                   .onChange((v: string) => {
                     this.decryptPwd = v;
                   })
-                Text(this.showDecryptPwd ? t('隐藏') : t('显示'))
-                  .fontSize(11)
-                  .fontColor(this.p().fgMain)
-                  .opacity(0.55)
+                SymbolGlyph(this.showDecryptPwd ? $r('sys.symbol.eye_slash') : $r('sys.symbol.eye'))
+                  .fontSize(17)
+                  .fontColor([this.p().fgMain])
+                  .opacity(0.5)
                   .padding({ left: 6, right: 4 })
                   .onClick(() => {
                     this.showDecryptPwd = !this.showDecryptPwd;
@@ -1076,10 +1076,10 @@ export struct ImportFlowSheet {
                     .onChange((v: string) => {
                       this.onboardingPwd1 = v;
                     })
-                  Text(this.showObPwd1 ? t('隐藏') : t('显示'))
-                    .fontSize(11)
-                    .fontColor(this.p().fgMain)
-                    .opacity(0.55)
+                  SymbolGlyph(this.showObPwd1 ? $r('sys.symbol.eye_slash') : $r('sys.symbol.eye'))
+                    .fontSize(17)
+                    .fontColor([this.p().fgMain])
+                    .opacity(0.5)
                     .padding({ left: 6, right: 4 })
                     .onClick(() => {
                       this.showObPwd1 = !this.showObPwd1;
@@ -1106,10 +1106,10 @@ export struct ImportFlowSheet {
                     .onChange((v: string) => {
                       this.onboardingPwd2 = v;
                     })
-                  Text(this.showObPwd2 ? t('隐藏') : t('显示'))
-                    .fontSize(11)
-                    .fontColor(this.p().fgMain)
-                    .opacity(0.55)
+                  SymbolGlyph(this.showObPwd2 ? $r('sys.symbol.eye_slash') : $r('sys.symbol.eye'))
+                    .fontSize(17)
+                    .fontColor([this.p().fgMain])
+                    .opacity(0.5)
                     .padding({ left: 6, right: 4 })
                     .onClick(() => {
                       this.showObPwd2 = !this.showObPwd2;
@@ -1227,8 +1227,8 @@ export struct ChangeMasterPwdSheet {
                 .onChange((v: string) => {
                   this.curPwd = v;
                 })
-              Text(this.showCur ? t('隐藏') : t('显示'))
-                .fontSize(11).fontColor(this.p().fgMain).opacity(0.55).padding({ left: 6, right: 4 })
+              SymbolGlyph(this.showCur ? $r('sys.symbol.eye_slash') : $r('sys.symbol.eye'))
+                .fontSize(17).fontColor([this.p().fgMain]).opacity(0.5).padding({ left: 6, right: 4 })
                 .onClick(() => {
                   this.showCur = !this.showCur;
                 })
@@ -1252,8 +1252,8 @@ export struct ChangeMasterPwdSheet {
                 .onChange((v: string) => {
                   this.newPwd = v;
                 })
-              Text(this.showNew ? t('隐藏') : t('显示'))
-                .fontSize(11).fontColor(this.p().fgMain).opacity(0.55).padding({ left: 6, right: 4 })
+              SymbolGlyph(this.showNew ? $r('sys.symbol.eye_slash') : $r('sys.symbol.eye'))
+                .fontSize(17).fontColor([this.p().fgMain]).opacity(0.5).padding({ left: 6, right: 4 })
                 .onClick(() => {
                   this.showNew = !this.showNew;
                 })
@@ -1277,8 +1277,8 @@ export struct ChangeMasterPwdSheet {
                 .onChange((v: string) => {
                   this.confirmPwd = v;
                 })
-              Text(this.showConfirm ? t('隐藏') : t('显示'))
-                .fontSize(11).fontColor(this.p().fgMain).opacity(0.55).padding({ left: 6, right: 4 })
+              SymbolGlyph(this.showConfirm ? $r('sys.symbol.eye_slash') : $r('sys.symbol.eye'))
+                .fontSize(17).fontColor([this.p().fgMain]).opacity(0.5).padding({ left: 6, right: 4 })
                 .onClick(() => {
                   this.showConfirm = !this.showConfirm;
                 })

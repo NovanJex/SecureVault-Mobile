@@ -264,10 +264,10 @@ export struct CreateVaultSheet {
                 .onChange((v: string) => {
                   this.pwd1 = v;
                 })
-              Text(this.showPwd1 ? t('隐藏') : t('显示'))
-                .fontSize(11)
-                .fontColor(this.p().fgMain)
-                .opacity(0.55)
+              SymbolGlyph(this.showPwd1 ? $r('sys.symbol.eye_slash') : $r('sys.symbol.eye'))
+                .fontSize(17)
+                .fontColor([this.p().fgMain])
+                .opacity(0.5)
                 .padding({ left: 6, right: 4 })
                 .onClick(() => {
                   this.showPwd1 = !this.showPwd1;
@@ -311,10 +311,10 @@ export struct CreateVaultSheet {
                 .onChange((v: string) => {
                   this.pwd2 = v;
                 })
-              Text(this.showPwd2 ? t('隐藏') : t('显示'))
-                .fontSize(11)
-                .fontColor(this.p().fgMain)
-                .opacity(0.55)
+              SymbolGlyph(this.showPwd2 ? $r('sys.symbol.eye_slash') : $r('sys.symbol.eye'))
+                .fontSize(17)
+                .fontColor([this.p().fgMain])
+                .opacity(0.5)
                 .padding({ left: 6, right: 4 })
                 .onClick(() => {
                   this.showPwd2 = !this.showPwd2;
@@ -378,6 +378,8 @@ export struct CreateVaultSheet {
                 if (ok) {
                   this.onClose();
                 }
+              } catch (e) {
+                vaultStore.showToast((e as Error).message || t('创建失败，请重试'), true);
               } finally {
                 this.submitting = false;
               }
@@ -483,10 +485,10 @@ export struct UnlockView {
                 .onChange((v: string) => {
                   this.unlockPwd = v;
                 })
-              Text(this.showPwd ? t('隐藏') : t('显示'))
-                .fontSize(11)
-                .fontColor(this.p().fgMain)
-                .opacity(0.55)
+              SymbolGlyph(this.showPwd ? $r('sys.symbol.eye_slash') : $r('sys.symbol.eye'))
+                .fontSize(17)
+                .fontColor([this.p().fgMain])
+                .opacity(0.5)
                 .padding({ left: 6, right: 4 })
                 .onClick(() => {
                   this.showPwd = !this.showPwd;

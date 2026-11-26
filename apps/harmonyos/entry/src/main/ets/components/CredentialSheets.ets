@@ -1112,10 +1112,10 @@ export struct EditCredentialSheet {
                     .onChange((v: string) => {
                       this.efPass = v;
                     })
-                  Text(this.efShowPass ? t('隐藏') : t('显示'))
-                    .fontSize(11)
-                    .fontColor(this.p().fgMain)
-                    .opacity(0.55)
+                  SymbolGlyph(this.efShowPass ? $r('sys.symbol.eye_slash') : $r('sys.symbol.eye'))
+                    .fontSize(17)
+                    .fontColor([this.p().fgMain])
+                    .opacity(0.5)
                     .padding({ left: 6, right: 4 })
                     .onClick(() => {
                       this.efShowPass = !this.efShowPass;

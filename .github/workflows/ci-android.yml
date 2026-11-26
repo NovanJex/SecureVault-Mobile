@@ -35,6 +35,7 @@ jobs:
         working-directory: core/rust
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.1.12297006
+          RUSTFLAGS: "-C link-arg=-Wl,-soname,libsecurevault_core.so"
         run: |
           cargo ndk \
             -t arm64-v8a \
@@ -51,6 +52,7 @@ jobs:
       - name: Build Android Debug APK
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.1.12297006
+          RUSTFLAGS: "-C link-arg=-Wl,-soname,libsecurevault_core.so"
         run: gradle -p apps/android assembleDebug --stacktrace
 
       - name: Upload Debug APK

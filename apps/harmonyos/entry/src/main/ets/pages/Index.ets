@@ -355,61 +355,73 @@ struct Index {
       Row().width(0).height(0).bindSheet($$this.showCreateVaultSheet, this.CreateVaultSheetBuilder(), {
         detents: [SheetSize.FIT_CONTENT, SheetSize.LARGE],
         dragBar: true,
+        showClose: false,
         backgroundColor: this.p().bgPage,
       })
       Row().width(0).height(0).bindSheet($$this.showRestoreActionSheet, this.RestoreActionSheetBuilder(), {
         detents: [SheetSize.FIT_CONTENT],
         dragBar: true,
+        showClose: false,
         backgroundColor: this.p().bgPage,
       })
       Row().width(0).height(0).bindSheet($$this.showEditSheet, this.EditSheetBuilder(), {
         detents: [SheetSize.LARGE],
         dragBar: true,
+        showClose: false,
         backgroundColor: this.p().bgPage,
       })
       Row().width(0).height(0).bindSheet($$this.showAddTotpSheet, this.AddTotpSheetBuilder(), {
         detents: [SheetSize.FIT_CONTENT, SheetSize.LARGE],
         dragBar: true,
+        showClose: false,
         backgroundColor: this.p().bgPage,
       })
       Row().width(0).height(0).bindSheet($$this.showFolderSheet, this.FolderSheetBuilder(), {
         detents: [SheetSize.FIT_CONTENT, SheetSize.LARGE],
         dragBar: true,
+        showClose: false,
         backgroundColor: this.p().bgPage,
       })
       Row().width(0).height(0).bindSheet($$this.showTrashSheet, this.TrashSheetBuilder(), {
         detents: [SheetSize.LARGE],
         dragBar: true,
+        showClose: false,
         backgroundColor: this.p().bgPage,
       })
       Row().width(0).height(0).bindSheet($$this.showGestureSetup, this.GestureSheetBuilder(), {
         detents: [SheetSize.FIT_CONTENT],
         dragBar: true,
+        showClose: false,
         backgroundColor: this.p().bgPage,
       })
       Row().width(0).height(0).bindSheet($$this.showWebDavSheet, this.WebDavSheetBuilder(), {
         detents: [SheetSize.LARGE],
         dragBar: true,
+        showClose: false,
         backgroundColor: this.p().bgPage,
       })
       Row().width(0).height(0).bindSheet($$this.showImportSheet, this.ImportSheetBuilder(), {
         detents: [SheetSize.LARGE],
         dragBar: true,
+        showClose: false,
         backgroundColor: this.p().bgPage,
       })
       Row().width(0).height(0).bindSheet($$this.showChangePwdSheet, this.ChangePwdSheetBuilder(), {
         detents: [SheetSize.FIT_CONTENT, SheetSize.LARGE],
         dragBar: true,
+        showClose: false,
         backgroundColor: this.p().bgPage,
       })
       Row().width(0).height(0).bindSheet($$this.showAboutSheet, this.AboutSheetBuilder(), {
         detents: [SheetSize.LARGE],
         dragBar: true,
+        showClose: false,
         backgroundColor: this.p().bgPage,
       })
       Row().width(0).height(0).bindSheet($$this.showVerifyPwdSheet, this.VerifyPwdSheetBuilder(), {
         detents: [SheetSize.FIT_CONTENT],
         dragBar: true,
+        showClose: false,
         backgroundColor: this.p().bgPage,
         onDisappear: () => {
           this.pendingBioTarget = '';
@@ -419,16 +431,19 @@ struct Index {
       Row().width(0).height(0).bindSheet($$this.showAutoLockSheet, this.AutoLockActionSheetBuilder(), {
         detents: [SheetSize.FIT_CONTENT],
         dragBar: true,
+        showClose: false,
         backgroundColor: this.p().bgPage,
       })
       Row().width(0).height(0).bindSheet($$this.showExportSheet, this.ExportActionSheetBuilder(), {
         detents: [SheetSize.FIT_CONTENT],
         dragBar: true,
+        showClose: false,
         backgroundColor: this.p().bgPage,
       })
       Row().width(0).height(0).bindSheet(vaultStore.showWebDavConflict, this.WebDavConflictActionSheetBuilder(), {
         detents: [SheetSize.FIT_CONTENT],
         dragBar: true,
+        showClose: false,
         backgroundColor: this.p().bgPage,
         onDisappear: () => {
           vaultStore.showWebDavConflict = false;
